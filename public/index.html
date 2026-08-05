@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mi Plan de Estudios</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-8 font-sans">
+  <div class="max-w-4xl mx-auto space-y-8">
+    <h1 class="text-3xl font-bold text-center text-blue-700">Mi Plan de Estudios</h1>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <!-- Formulario: Agregar Materia -->
+      <div class="bg-white p-6 rounded-lg shadow-md">
+        <h2 class="text-xl font-semibold mb-4 text-gray-800">Agregar Materia</h2>
+        <form id="form-materia" class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700">Nombre</label>
+            <input type="text" id="nombre" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border">
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700">Año</label>
+              <input type="number" id="anio" required min="1" max="6" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700">Cuatrimestre</label>
+              <select id="cuatrimestre" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border">
+                <option value="1">1er Cuatrimestre</option>
+                <option value="2">2do Cuatrimestre</option>
+                <option value="0">Anual</option>
+              </select>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700">Créditos (Opcional)</label>
+              <input type="number" id="creditos" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border">
+            </div>
+            <div class="flex items-center mt-6">
+              <input type="checkbox" id="es_optativa" class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+              <label class="ml-2 block text-sm text-gray-900">Es Optativa</label>
+            </div>
+          </div>
+          <button type="submit" class="w-full bg-blue-600 text-white font-bold py-2 px-4 rounded hover:bg-blue-700">Guardar Materia</button>
+        </form>
+      </div>
+
+      <!-- Formulario: Vincular Correlativas -->
+      <div class="bg-white p-6 rounded-lg shadow-md">
+        <h2 class="text-xl font-semibold mb-4 text-gray-800">Vincular Correlativas</h2>
+        <form id="form-correlativas" class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700">Materia a cursar/rendir</label>
+            <select id="materia_id" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border"></select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700">Requiere haber hecho...</label>
+            <select id="requiere_id" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border"></select>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700">Tipo de Requisito</label>
+              <select id="tipo_requisito" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border">
+                <option value="para_cursar">Para Cursar</option>
+                <option value="para_rendir">Para Rendir</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700">Condición Necesaria</label>
+              <select id="condicion_requerida" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border">
+                <option value="regular">Regular</option>
+                <option value="aprobada">Aprobada</option>
+              </select>
+            </div>
+          </div>
+          <button type="submit" class="w-full bg-green-600 text-white font-bold py-2 px-4 rounded hover:bg-green-700">Vincular Materias</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Lista de Materias -->
+    <div id="lista-materias" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+  </div>
+
+  <script>
+    let materiasGlobal = [];
+
+    // Formatear estado a colores de Tailwind
+    function colorEstado(estado) {
+      switch(estado) {
+        case 'aprobada': return 'bg-green-100 text-green-800 border-green-300';
+        case 'regular': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
+        case 'en_curso': return 'bg-blue-100 text-blue-800 border-blue-300';
+        default: return 'bg-gray-100 text-gray-800 border-gray-300';
+      }
+    }
+
+    async function cargarMaterias() {
+      const res = await fetch('/api/materias');
+      materiasGlobal = await res.json();
+      
+      const contenedor = document.getElementById('lista-materias');
+      const selectMateria = document.getElementById('materia_id');
+      const selectRequiere = document.getElementById('requiere_id');
+
+      // Limpiar y llenar selects
+      let optionsHtml = '<option value="">Seleccionar materia...</option>';
+      materiasGlobal.forEach(m => {
+        optionsHtml += `<option value="${m.id}">${m.nombre}</option>`;
+      });
+      selectMateria.innerHTML = optionsHtml;
+      selectRequiere.innerHTML = optionsHtml;
+
+      // Renderizar Tarjetas
+      contenedor.innerHTML = materiasGlobal.map(m => {
+        const tiempoStr = m.cuatrimestre === 0 ? `Año ${m.anio} - Anual` : `Año ${m.anio} - Cuatrimestre ${m.cuatrimestre}`;
+        const optativaStr = m.es_optativa ? `<span class="text-xs bg-purple-100 text-purple-800 px-2 py-1 rounded">Optativa</span>` : '';
+        
+        let correlativasHtml = '';
+        if (m.correlativas && m.correlativas.length > 0) {
+          correlativasHtml = `<div class="mt-3 text-sm text-gray-600">
+            <strong>Requisitos:</strong><ul class="list-disc pl-5 mt-1">
+            ${m.correlativas.map(c => `<li>Para ${c.tipo_requisito.split('_')[1]}: ${c.nombre_requerida || 'ID ' + c.requiere_id} (${c.condicion_requerida})</li>`).join('')}
+            </ul></div>`;
+        }
+
+        return `
+          <div class="bg-white p-5 rounded-lg shadow border-l-4 ${colorEstado(m.estado)}">
+            <div class="flex justify-between items-start">
+              <h3 class="text-lg font-bold text-gray-800">${m.nombre}</h3>
+              ${optativaStr}
+            </div>
+            <p class="text-sm text-gray-500 mt-1">${tiempoStr}</p>
+            ${correlativasHtml}
+            
+            <div class="mt-4 pt-4 border-t border-gray-200 flex gap-2">
+              <select id="estado-${m.id}" class="text-sm rounded border-gray-300 p-1 flex-grow border">
+                <option value="pendiente" ${m.estado === 'pendiente' ? 'selected' : ''}>Pendiente</option>
+                <option value="en_curso" ${m.estado === 'en_curso' ? 'selected' : ''}>En Curso</option>
+                <option value="regular" ${m.estado === 'regular' ? 'selected' : ''}>Regularizada</option>
+                <option value="aprobada" ${m.estado === 'aprobada' ? 'selected' : ''}>Aprobada</option>
+              </select>
+              <button onclick="actualizarEstado(${m.id})" class="bg-gray-800 text-white text-sm px-3 py-1 rounded hover:bg-gray-700">G</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // Agregar Materia
+    document.getElementById('form-materia').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const body = {
+        nombre: document.getElementById('nombre').value,
+        anio: parseInt(document.getElementById('anio').value),
+        cuatrimestre: parseInt(document.getElementById('cuatrimestre').value),
+        creditos: document.getElementById('creditos').value ? parseInt(document.getElementById('creditos').value) : null,
+        es_optativa: document.getElementById('es_optativa').checked ? 1 : 0
+      };
+
+      await fetch('/api/materias', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      e.target.reset();
+      cargarMaterias();
+    });
+
+    // Agregar Correlativa
+    document.getElementById('form-correlativas').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const body = {
+        materia_id: parseInt(document.getElementById('materia_id').value),
+        requiere_id: parseInt(document.getElementById('requiere_id').value),
+        tipo_requisito: document.getElementById('tipo_requisito').value,
+        condicion_requerida: document.getElementById('condicion_requerida').value
+      };
+
+      if(body.materia_id === body.requiere_id) return alert("Una materia no puede requerirse a sí misma.");
+
+      const res = await fetch('/api/correlativas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      
+      if(!res.ok) alert("Error al vincular. Tal vez ya existe.");
+      e.target.reset();
+      cargarMaterias();
+    });
+
+    // Actualizar Estado
+    async function actualizarEstado(id) {
+      const nuevoEstado = document.getElementById(`estado-${id}`).value;
+      await fetch(`/api/materias/${id}/estado`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ estado: nuevoEstado })
+      });
+      cargarMaterias();
+    }
+
+    // Iniciar
+    cargarMaterias();
+  </script>
+</body>
+</html>
