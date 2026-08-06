@@ -55,21 +55,19 @@ function convertirCuatrimestre(cuatrimestre) {
 }
 
 async function ejecutarSeed() {
-  // Garantizar que el esquema esté creado antes de insertar
+  // 1. Comentamos la creación del esquema porque las tablas ya existen en Neon
   await initSchema();
 
   console.log('=== Iniciando seeder ===\n');
 
-  // Vaciar las tablas para empezar desde cero (respetando FKs: primero las hijas)
+  // 2. Comentamos el borrado de usuarios para NO perder tu cuenta Admin
   await pool.query('DELETE FROM usuario_materia');
   await pool.query('DELETE FROM correlativas');
   await pool.query('DELETE FROM materias');
-  await pool.query('DELETE FROM usuarios');
+  // await pool.query('DELETE FROM usuarios'); <--- COMENTÁ ESTA TAMBIÉN
 
-  // Restablecer los contadores de autoincremento (SERIAL usa secuencias)
-  for (const tabla of ['usuarios', 'materias']) {
-    await pool.query(`ALTER SEQUENCE ${tabla}_id_seq RESTART WITH 1`);
-  }
+  // Restablecer los contadores de autoincremento (solo de materias)
+  await pool.query('ALTER SEQUENCE materias_id_seq RESTART WITH 1');
 
   // Mapeo en memoria: nro de la materia -> id real en la base de datos
   const mapaIds = {};
