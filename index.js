@@ -74,12 +74,29 @@ app.post('/api/login', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /api/carreras
+// Pública. Devuelve todas las carreras (id, nombre, plan) para que el frontend
+// pueda armar el menú desplegable del registro.
+// ---------------------------------------------------------------------------
+app.get('/api/carreras', async (req, res) => {
+  try {
+    const resultado = await pool.query(
+      'SELECT id, nombre, plan FROM carreras ORDER BY id ASC'
+    );
+    res.json(resultado.rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // AUTH: POST /api/register
 // Registro público. Crea un usuario con rol 'user' e is_approved = false.
+// Acepta carrera_id (opcional) para asociar al usuario a una carrera.
 // Un administrador deberá aprobar la cuenta antes de que pueda iniciar sesión.
 // ---------------------------------------------------------------------------
 app.post('/api/register', async (req, res) => {
-  const { username, password } = req.body;
+  const { username, password, carrera_id } = req.body;
 
   if (!username || !password) {
     return res.status(400).json({ error: 'Username y password son obligatorios' });
@@ -95,18 +112,27 @@ app.post('/api/register', async (req, res) => {
       return res.status(409).json({ error: `El usuario '${username}' ya existe` });
     }
 
+    // Si viene carrera_id, validamos que la carrera exista
+    if (carrera_id !== undefined && carrera_id !== null) {
+      const carreraResult = await pool.query('SELECT id FROM carreras WHERE id = $1', [carrera_id]);
+      if (carreraResult.rows.length === 0) {
+        return res.status(400).json({ error: 'La carrera especificada no existe' });
+      }
+    }
+
     const SALT_ROUNDS = 10;
     const passwordHash = bcrypt.hashSync(password, SALT_ROUNDS);
 
-    // Guardamos el usuario con rol 'user' y sin aprobación (pendiente de admin)
+    // Guardamos el usuario con rol 'user' y sin aprobación (pendiente de admin).
+    // carrera_id es opcional: si no se envía, se guarda null (legacy).
     await pool.query(`
-      INSERT INTO usuarios (username, password_hash, rol, is_approved)
-      VALUES ($1, $2, 'user', false)
-    `, [username, passwordHash]);
+      INSERT INTO usuarios (username, password_hash, rol, is_approved, carrera_id)
+      VALUES ($1, $2, 'user', false, $3)
+    `, [username, passwordHash, carrera_id || null]);
 
     res.status(201).json({
       message: 'Cuenta creada. Esperá a que el administrador la apruebe',
-      usuario: { username, rol: 'user', is_approved: false }
+      usuario: { username, rol: 'user', is_approved: false, carrera_id: carrera_id || null }
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -391,8 +417,21 @@ app.get('/api/materias', async (req, res) => {
   }
 
   try {
+    // Obtenemos el carrera_id del usuario autenticado.
+    // Los usuarios "legacy" (creados antes de la multi-carrera) tienen
+    // carrera_id en null: en ese caso asumimos por defecto carrera_id = 1
+    // (Ingeniería Informática).
+    const usuarioResult = await pool.query(
+      'SELECT carrera_id FROM usuarios WHERE id = $1',
+      [usuario_id]
+    );
+    const usuarioCarrera = usuarioResult.rows[0];
+    let carrera_id = (usuarioCarrera && usuarioCarrera.carrera_id) || 1;
+
     // LEFT JOIN: si el usuario no tiene registro en usuario_materia,
     // COALESCE devuelve 'pendiente' como estado por defecto.
+    // Filtramos por m.carrera_id para que el usuario solo reciba la grilla
+    // de asignación de materias correspondiente a SU carrera.
     const sqlMaterias = `
       SELECT m.id, m.nombre, m.anio, m.cuatrimestre, m.tipo,
              COALESCE(um.estado, 'pendiente') AS estado,
@@ -400,6 +439,7 @@ app.get('/api/materias', async (req, res) => {
       FROM materias m
       LEFT JOIN usuario_materia um
         ON um.materia_id = m.id AND um.usuario_id = $1
+      WHERE m.carrera_id = $2
       ORDER BY m.anio ASC, m.cuatrimestre ASC
     `;
     const sqlCorrelativas = `
@@ -410,7 +450,7 @@ app.get('/api/materias', async (req, res) => {
       ORDER BY c.materia_id ASC
     `;
 
-    const materiasResult = await pool.query(sqlMaterias, [usuario_id]);
+    const materiasResult = await pool.query(sqlMaterias, [usuario_id, carrera_id]);
     const correlativasResult = await pool.query(sqlCorrelativas);
     const materias = materiasResult.rows;
     const correlativas = correlativasResult.rows;

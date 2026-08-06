@@ -12,6 +12,14 @@ async function initSchema() {
   await pool.query(`
     -- (BORRAMOS EL DROP TABLE)
 
+    -- Tabla de carreras (multi-tenant / multi-carrera)
+    CREATE TABLE IF NOT EXISTS carreras (
+      id SERIAL PRIMARY KEY,
+      nombre TEXT NOT NULL,
+      plan TEXT NOT NULL,
+      UNIQUE (nombre, plan)
+    );
+
     -- Tabla de usuarios (NO se borra)
     CREATE TABLE IF NOT EXISTS usuarios (
       id SERIAL PRIMARY KEY,
@@ -62,6 +70,33 @@ async function initSchema() {
         WHERE table_name = 'usuario_materia' AND column_name = 'nota'
       ) THEN
         ALTER TABLE usuario_materia ADD COLUMN nota NUMERIC(4,1) DEFAULT NULL;
+      END IF;
+    END $$
+  `);
+
+  // Migración segura multi-carrera:
+  // Agregar carrera_id a `usuarios` (permite nulos temporalmente para no romper usuarios actuales)
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'usuarios' AND column_name = 'carrera_id'
+      ) THEN
+        ALTER TABLE usuarios ADD COLUMN carrera_id INTEGER REFERENCES carreras(id);
+      END IF;
+    END $$
+  `);
+
+  // Agregar carrera_id a `materias`
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'materias' AND column_name = 'carrera_id'
+      ) THEN
+        ALTER TABLE materias ADD COLUMN carrera_id INTEGER REFERENCES carreras(id);
       END IF;
     END $$
   `);

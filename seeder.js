@@ -69,20 +69,37 @@ async function ejecutarSeed() {
   // Restablecer los contadores de autoincremento (solo de materias)
   await pool.query('ALTER SEQUENCE materias_id_seq RESTART WITH 1');
 
+  // --- MULTICARRERA: insertar la carrera actual y obtener su id ---
+  console.log('Insertando carrera "Ingeniería Informática" (plan 2/25)...');
+
+  await pool.query(`
+    INSERT INTO carreras (nombre, plan)
+    VALUES ($1, $2)
+    ON CONFLICT (nombre, plan) DO NOTHING
+  `, ['Ingeniería Informática', '2/25']);
+
+  const carreraRow = await pool.query(
+    'SELECT id FROM carreras WHERE nombre = $1 AND plan = $2',
+    ['Ingeniería Informática', '2/25']
+  );
+  const carreraId = carreraRow.rows[0].id;
+  console.log(`Carrera lista (id=${carreraId})\n`);
+
   // Mapeo en memoria: nro de la materia -> id real en la base de datos
   const mapaIds = {};
 
   console.log('Insertando materias (grilla global)...');
   for (const materia of materias) {
     const resultado = await pool.query(`
-      INSERT INTO materias (nombre, anio, cuatrimestre, tipo)
-      VALUES ($1, $2, $3, $4)
+      INSERT INTO materias (nombre, anio, cuatrimestre, tipo, carrera_id)
+      VALUES ($1, $2, $3, $4, $5)
       RETURNING id
     `, [
       materia.nombre,
       materia.anio,
       convertirCuatrimestre(materia.cuatrimestre),
-      materia.tipo
+      materia.tipo,
+      carreraId
     ]);
     mapaIds[materia.nro] = resultado.rows[0].id;
   }
