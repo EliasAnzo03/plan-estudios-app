@@ -173,6 +173,86 @@ function App() {
     }
   }
 
+  // Guarda la nota de una materia aprobada (1 a 10, admite decimales)
+  // Hace un PUT al backend y actualiza el estado local optimista.
+  const guardarNota = async (materiaId, valor) => {
+    // Permitimos vacío (limpiará la nota)
+    if (valor === '') {
+      setMaterias((prev) =>
+        prev.map((m) => (m.id === materiaId ? { ...m, nota: null } : m))
+      )
+      try {
+        await verificarNoAutorizado(
+          await fetch(`${API_URL}/api/materias/${materiaId}/nota`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: 'Bearer ' + token,
+            },
+            body: JSON.stringify({ nota: null }),
+          })
+        )
+      } catch (error) {
+        console.error('Error de red al guardar la nota:', error)
+      }
+      return
+    }
+
+    const notaNum = Number(valor)
+    if (isNaN(notaNum) || notaNum < 1 || notaNum > 10) {
+      return
+    }
+
+    try {
+      const respuesta = await verificarNoAutorizado(
+        await fetch(`${API_URL}/api/materias/${materiaId}/nota`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer ' + token,
+          },
+          body: JSON.stringify({ nota: notaNum }),
+        })
+      )
+      if (!respuesta.ok) {
+        console.error('Error al guardar la nota')
+        return
+      }
+      setMaterias((prev) =>
+        prev.map((m) => (m.id === materiaId ? { ...m, nota: notaNum } : m))
+      )
+    } catch (error) {
+      console.error('Error de red al guardar la nota:', error)
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // Cálculos para el Dashboard de Progreso y Promedio
+  // ---------------------------------------------------------------
+  const totalMaterias = materias.length
+  const materiasAprobadas = materias.filter((m) => m.estado === 'aprobada')
+  const porcentajeAvance =
+    totalMaterias > 0
+      ? Math.round((materiasAprobadas.length / totalMaterias) * 100)
+      : 0
+
+  // Promedio histórico: promedio de las notas ingresadas en materias aprobadas
+  const notasAprobadas = materiasAprobadas
+    .map((m) => m.nota)
+    .filter(
+      (n) => n !== null && n !== undefined && n !== '' && !isNaN(Number(n))
+    )
+  const promedioHistorico =
+    notasAprobadas.length > 0
+      ? (
+          notasAprobadas.reduce((acc, n) => acc + Number(n), 0) /
+          notasAprobadas.length
+        ).toFixed(2)
+      : null
+  const promedioMostrado =
+    promedioHistorico !== null ? promedioHistorico : '—'
+  const cantidadNotas = notasAprobadas.length
+
   // Agrupa las materias por año y luego por cuatrimestre (1, 2 o 'A' anuales)
   const agruparMaterias = () => {
     const grupos = {}
@@ -438,6 +518,49 @@ function App() {
         </div>
       )}
 
+      {/* Dashboard de Progreso y Promedio */}
+      <div className="max-w-6xl mx-auto mb-8">
+        <div className="bg-slate-900 rounded-2xl border border-slate-800 shadow-[0_0_25px_rgba(99,102,241,0.1)] p-6 sm:p-8">
+          <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
+            {/* Porcentaje de avance con barra de progreso */}
+            <div className="flex-1 min-w-0">
+              <p className="text-slate-500 text-xs font-semibold uppercase tracking-widest mb-1">
+                Progreso de la carrera
+              </p>
+              <div className="flex items-end justify-between mb-2">
+                <span className="text-3xl font-bold text-indigo-400">
+                  {porcentajeAvance}%
+                </span>
+                <span className="text-xs text-slate-500 font-mono">
+                  {materiasAprobadas.length} / {totalMaterias} materias aprobadas
+                </span>
+              </div>
+              <div className="w-full h-4 bg-slate-800 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-indigo-500 to-green-400 rounded-full transition-all duration-500"
+                  style={{ width: `${porcentajeAvance}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Promedio histórico */}
+            <div className="sm:border-l sm:border-slate-800 sm:pl-6 sm:shrink-0">
+              <p className="text-slate-500 text-xs font-semibold uppercase tracking-widest mb-1 text-center sm:text-left">
+                Promedio histórico
+              </p>
+              <div className="text-center sm:text-left">
+                <span className="text-4xl font-bold text-green-400">
+                  {promedioMostrado}
+                </span>
+                <p className="text-xs text-slate-500 mt-1 font-mono">
+                  {cantidadNotas} {cantidadNotas === 1 ? 'nota cargada' : 'notas cargadas'}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Timeline de la malla curricular agrupado por Año y Cuatrimestre */}
       <div className="max-w-6xl mx-auto space-y-6">
         {agruparMaterias().map((grupo) => (
@@ -498,6 +621,29 @@ function App() {
                         {materia.nombre}
                       </h3>
                     </div>
+
+                    {/* Input de nota: solo se muestra si la materia está "Aprobada" */}
+                    {materia.estado === 'aprobada' && (
+                      <div
+                        className="w-full flex items-center gap-2"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <label className="text-[10px] uppercase tracking-wider text-green-400/80 font-semibold shrink-0">
+                          Nota
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          max="10"
+                          step="0.5"
+                          placeholder="1-10"
+                          value={materia.nota ?? ''}
+                          onChange={(e) => guardarNota(materia.id, e.target.value)}
+                          className="w-20 px-2 py-1 rounded-lg bg-slate-800 border border-green-500/40 text-green-300 text-sm font-mono text-center focus:outline-none focus:ring-2 focus:ring-green-500/50 focus:border-green-500 placeholder:text-slate-600"
+                        />
+                      </div>
+                    )}
+
                     {!puedeCursar && (
                       <p className="mt-3 text-xs text-slate-500 flex items-center gap-1">
                         🔒 Regularizá las correlativas para cursar

@@ -356,7 +356,8 @@ app.get('/api/materias', verificarToken, async (req, res) => {
     // COALESCE devuelve 'pendiente' como estado por defecto.
     const sqlMaterias = `
       SELECT m.id, m.nombre, m.anio, m.cuatrimestre, m.tipo,
-             COALESCE(um.estado, 'pendiente') AS estado
+             COALESCE(um.estado, 'pendiente') AS estado,
+             um.nota AS nota
       FROM materias m
       LEFT JOIN usuario_materia um
         ON um.materia_id = m.id AND um.usuario_id = $1
@@ -455,6 +456,54 @@ app.patch('/api/materias/:id/estado', verificarToken, async (req, res) => {
     `, [usuario_id, Number(id), estado]);
 
     res.json({ message: 'Estado actualizado correctamente', estado, materia_id: Number(id) });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// PUT /api/materias/:id/nota
+// Inserta o actualiza la nota de una materia aprobada para el usuario autenticado.
+// Acepta un número entre 1 y 10 (admite decimales) o null para limpiarla.
+// UPSERT mediante ON CONFLICT.
+// ---------------------------------------------------------------------------
+app.put('/api/materias/:id/nota', verificarToken, async (req, res) => {
+  const { id } = req.params;
+  const { nota } = req.body;
+  const usuario_id = req.usuarioId;
+
+  // La nota puede ser null (para limpiarla) o un número entre 1 y 10
+  if (nota !== null) {
+    if (typeof nota !== 'number' || isNaN(nota) || nota < 1 || nota > 10) {
+      return res.status(400).json({
+        error: 'La nota debe ser un número entre 1 y 10, o null para limpiarla'
+      });
+    }
+  }
+
+  try {
+    const materiaResult = await pool.query(
+      'SELECT id FROM materias WHERE id = $1',
+      [id]
+    );
+    if (materiaResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Materia no encontrada' });
+    }
+
+    // UPSERT: inserta la fila usuario_materia si no existe (con su estado actual)
+    // o actualiza la nota si ya existía.
+    await pool.query(`
+      INSERT INTO usuario_materia (usuario_id, materia_id, estado, nota)
+      VALUES ($1, $2, 'pendiente', $3)
+      ON CONFLICT (usuario_id, materia_id)
+      DO UPDATE SET nota = excluded.nota
+    `, [usuario_id, Number(id), nota]);
+
+    res.json({
+      message: 'Nota guardada correctamente',
+      nota,
+      materia_id: Number(id)
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

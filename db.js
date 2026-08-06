@@ -35,6 +35,7 @@ async function initSchema() {
       usuario_id INTEGER NOT NULL,
       materia_id INTEGER NOT NULL,
       estado TEXT NOT NULL DEFAULT 'pendiente',
+      nota NUMERIC(4,1) DEFAULT NULL,
       PRIMARY KEY (usuario_id, materia_id),
       FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
       FOREIGN KEY (materia_id) REFERENCES materias(id) ON DELETE CASCADE
@@ -50,6 +51,19 @@ async function initSchema() {
       FOREIGN KEY (requiere_id) REFERENCES materias(id) ON DELETE CASCADE,
       PRIMARY KEY (materia_id, requiere_id, tipo_requisito)
     );
+  `);
+
+  // Asegurar la columna `nota` en tablas existentes (migración segura)
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'usuario_materia' AND column_name = 'nota'
+      ) THEN
+        ALTER TABLE usuario_materia ADD COLUMN nota NUMERIC(4,1) DEFAULT NULL;
+      END IF;
+    END $$
   `);
 }
 
