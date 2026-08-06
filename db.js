@@ -9,12 +9,9 @@ const pool = new Pool({
 });
 
 async function initSchema() {
-  // Elimina solo las tablas de materias y relaciones, conservando usuarios
   await pool.query(`
-    DROP TABLE IF EXISTS correlativas, usuario_materia, materias CASCADE;
-  `);
+    -- (BORRAMOS EL DROP TABLE)
 
-  await pool.query(`
     -- Tabla de usuarios (NO se borra)
     CREATE TABLE IF NOT EXISTS usuarios (
       id SERIAL PRIMARY KEY,
