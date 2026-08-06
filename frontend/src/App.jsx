@@ -655,6 +655,7 @@ function App() {
                     <tr className="text-slate-500 text-xs uppercase tracking-wider border-b border-slate-800">
                       <th className="py-2 pr-4">ID</th>
                       <th className="py-2 pr-4">Usuario</th>
+                      <th className="py-2 pr-4">Carrera</th>
                       <th className="py-2 pr-4">Rol</th>
                       <th className="py-2">Estado</th>
                       <th className="py-2 text-right">Acciones</th>
@@ -670,6 +671,16 @@ function App() {
                           {u.id}
                         </td>
                         <td className="py-3 pr-4 font-semibold">{u.username}</td>
+                        <td className="py-3 pr-4">
+                          {u.carrera_nombre ? (
+                            <span className="inline-flex items-center gap-1.5 text-xs text-indigo-300/80 bg-indigo-500/10 border border-indigo-500/30 rounded-full px-2.5 py-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400/70 inline-block"></span>
+                              {u.carrera_nombre}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-slate-600 italic">S/Carrera</span>
+                          )}
+                        </td>
                         <td className="py-3 pr-4 uppercase text-xs">
                           {u.rol}
                         </td>

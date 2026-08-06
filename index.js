@@ -314,10 +314,12 @@ app.get('/api/admin/usuarios', verificarToken, requiereRol('admin'), async (req,
 app.get('/api/admin/users', verificarToken, requiereRol('admin'), async (req, res) => {
   try {
     const resultado = await pool.query(`
-      SELECT id, username, rol, is_approved
-      FROM usuarios
-      WHERE is_approved = false
-      ORDER BY id ASC
+      SELECT u.id, u.username, u.rol, u.is_approved,
+             c.nombre AS carrera_nombre
+      FROM usuarios u
+      LEFT JOIN carreras c ON c.id = u.carrera_id
+      WHERE u.is_approved = false
+      ORDER BY u.id ASC
     `);
 
     const usuarios = resultado.rows;
