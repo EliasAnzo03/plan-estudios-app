@@ -37,6 +37,7 @@ function App() {
   const [usuariosPendientes, setUsuariosPendientes] = useState([])
   const [cargandoPendientes, setCargandoPendientes] = useState(false)
   const [errorAdmin, setErrorAdmin] = useState('')
+  const [materiaInfo, setMateriaInfo] = useState(null) // materia abierta en el modal de correlativas
   const [token, setToken] = useState(() => localStorage.getItem('token'))
   const [usuario, setUsuario] = useState(() => {
     try {
@@ -131,10 +132,16 @@ function App() {
     return respuesta
   }
 
-  // Cambia el estado de forma cíclica al hacer clic en una tarjeta
-  const ciclarEstadoMateria = async (materia) => {
+  // Cambia el estado de forma cíclica al hacer clic en una tarjeta.
+  // bloqueando el paso a "aprobada" si no se cumplen las correlativas de rendición.
+  const ciclarEstadoMateria = async (materia, puedeRendir) => {
     const indiceActual = ORDEN_CICLO.indexOf(materia.estado)
     const nuevoEstado = ORDEN_CICLO[(indiceActual + 1) % ORDEN_CICLO.length]
+
+    // Regla 2: el estado "Aprobada" queda bloqueado si falta aprobar las correlativas para rendir.
+    if (nuevoEstado === 'aprobada' && !puedeRendir) {
+      return
+    }
 
     try {
       const respuesta = await verificarNoAutorizado(
@@ -202,6 +209,36 @@ function App() {
         ? '1ER SEM'
         : '2DO SEM'
     return `${anio} - ${cuatri}`
+  }
+
+  // Determina si se cumplen las correlativas de una materia para el nivel dado.
+  // tipo = 'paraCursar' -> se exige "regular" o "aprobada" en cada requisito.
+  // tipo = 'paraRendir' -> se exige estrictamente "aprobada" en cada requisito.
+  const cumpleCorrelativas = (materia, tipo) => {
+    const estadoMinimo = tipo === 'paraRendir' ? 'aprobada' : 'regular'
+
+    // Esquema nuevo: correlativas { paraCursar: [...], paraRendir: [...] } por nombre.
+    const listaNombres = materia.correlativas && materia.correlativas[tipo]
+    if (listaNombres && listaNombres.length > 0) {
+      return listaNombres.every((nombre) => {
+        const req = materias.find((m) => m.nombre === nombre)
+        if (!req) return false
+        return estadoMinimo === 'aprobada'
+          ? req.estado === 'aprobada'
+          : req.estado === 'regular' || req.estado === 'aprobada'
+      })
+    }
+
+    // Fallback: esquema antiguo con correlativas_ids (array de IDs).
+    const ids = materia.correlativas_ids || []
+    if (ids.length === 0) return true
+    return ids.every((id) => {
+      const req = materias.find((m) => m.id === id)
+      if (!req) return false
+      return estadoMinimo === 'aprobada'
+        ? req.estado === 'aprobada'
+        : req.estado === 'regular' || req.estado === 'aprobada'
+    })
   }
 
   useEffect(() => {
@@ -428,14 +465,12 @@ function App() {
                 const estilo =
                   ESTILOS_ESTADO[materia.estado] || ESTILOS_ESTADO.pendiente
 
-                // True si todas las correlativas están aprobadas. Array vacío = sin correlativas = aprobado.
-                const correlativasAprobadas =
-                  (materia.correlativas_ids || []).every((id) => {
-                    const req = materias.find((m) => m.id === id)
-                    return req && req.estado === 'aprobada'
-                  })
+                // Regla 1: puede cursar (En Curso / Regular) si paraCursar está en regular o aprobada.
+                const puedeCursar = cumpleCorrelativas(materia, 'paraCursar')
+                // Regla 2: puede rendir (Aprobada) solo si paraRendir está estrictamente aprobada.
+                const puedeRendir = cumpleCorrelativas(materia, 'paraRendir')
 
-                const tarjetaClases = correlativasAprobadas
+                const tarjetaClases = puedeCursar
                   ? `bg-slate-900 rounded-xl border ${estilo.borde} p-5 w-full sm:w-64 transition-transform duration-300 hover:scale-105 active:scale-95 cursor-pointer`
                   : `bg-slate-950/50 rounded-xl border border-slate-800 text-slate-500 p-5 w-full sm:w-64 opacity-60`
 
@@ -443,25 +478,43 @@ function App() {
                   <div
                     key={materia.id}
                     onClick={
-                      correlativasAprobadas
-                        ? () => ciclarEstadoMateria(materia)
+                      puedeCursar
+                        ? () => ciclarEstadoMateria(materia, puedeRendir)
                         : undefined
                     }
                     className={tarjetaClases}
                   >
-                    <div className="flex flex-col items-start gap-3">
-                      <span
-                        className={`text-xs font-bold tracking-widest uppercase px-2 py-1 rounded-full ${estilo.badge}`}
-                      >
-                        {estilo.etiqueta}
-                      </span>
-                      <h3 className="font-semibold text-lg text-slate-100 break-words">
+                    <div className="flex flex-col items-start gap-3 relative">
+                      <div className="w-full flex items-center justify-between gap-2">
+                        <span
+                          className={`text-xs font-bold tracking-widest uppercase px-2 py-1 rounded-full ${estilo.badge}`}
+                        >
+                          {estilo.etiqueta}
+                        </span>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setMateriaInfo(materia)
+                          }}
+                          className="w-7 h-7 flex items-center justify-center rounded-full border border-slate-700 text-slate-400 hover:text-indigo-300 hover:border-indigo-500/60 transition-all duration-300 cursor-pointer shrink-0"
+                          aria-label={`Ver correlativas de ${materia.nombre}`}
+                          title="Ver correlativas"
+                        >
+                          ℹ️
+                        </button>
+                      </div>
+                      <h3 className="font-semibold text-lg text-slate-100 break-words pr-1">
                         {materia.nombre}
                       </h3>
                     </div>
-                    {!correlativasAprobadas && (
+                    {!puedeCursar && (
                       <p className="mt-3 text-xs text-slate-500 flex items-center gap-1">
-                        🔒 Correlativas pendientes
+                        🔒 Regularizá las correlativas para cursar
+                      </p>
+                    )}
+                    {puedeCursar && !puedeRendir && materia.estado === 'regular' && (
+                      <p className="mt-3 text-xs text-orange-400 flex items-center gap-1">
+                        🔒 Aprobá las correlativas para rendir
                       </p>
                     )}
                   </div>
@@ -471,6 +524,86 @@ function App() {
           </div>
         ))}
       </div>
+
+      {/* Modal de información: correlativas de la materia */}
+      {materiaInfo && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+          onClick={() => setMateriaInfo(null)}
+        >
+          <div
+            className="w-full max-w-md bg-slate-900 rounded-2xl border border-slate-700 shadow-[0_0_40px_rgba(99,102,241,0.25)] p-6 sm:p-8 max-h-[85vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <h2 className="text-xl font-bold text-slate-100 break-words">
+                {materiaInfo.nombre}
+              </h2>
+              <button
+                onClick={() => setMateriaInfo(null)}
+                className="w-8 h-8 flex items-center justify-center rounded-full text-slate-400 hover:text-red-400 hover:bg-red-500/10 border border-slate-700 transition-all duration-300 cursor-pointer shrink-0"
+                aria-label="Cerrar"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-500 uppercase tracking-widest mb-4">
+              Correlativas requeridas
+            </p>
+
+            {/* Sección: Para Cursar */}
+            {materiaInfo.correlativas?.paraCursar?.length > 0 && (
+              <div className="mb-5">
+                <h3 className="text-xs font-bold uppercase tracking-widest text-blue-400 mb-2 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-blue-500 inline-block"></span>
+                  Para Cursar
+                </h3>
+                <ul className="space-y-2">
+                  {materiaInfo.correlativas.paraCursar.map((nombre, i) => (
+                    <li
+                      key={i}
+                      className="flex items-center gap-2 text-sm text-slate-300 bg-slate-800/50 border border-slate-800 rounded-lg px-3 py-2"
+                    >
+                      <span className="text-blue-400 shrink-0">▸</span>
+                      <span className="break-words">{nombre}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Sección: Para Rendir */}
+            {materiaInfo.correlativas?.paraRendir?.length > 0 && (
+              <div>
+                <h3 className="text-xs font-bold uppercase tracking-widest text-green-400 mb-2 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-green-500 inline-block"></span>
+                  Para Rendir
+                </h3>
+                <ul className="space-y-2">
+                  {materiaInfo.correlativas.paraRendir.map((nombre, i) => (
+                    <li
+                      key={i}
+                      className="flex items-center gap-2 text-sm text-slate-300 bg-slate-800/50 border border-slate-800 rounded-lg px-3 py-2"
+                    >
+                      <span className="text-green-400 shrink-0">▸</span>
+                      <span className="break-words">{nombre}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Caso sin correlativas */}
+            {!materiaInfo.correlativas?.paraCursar?.length &&
+              !materiaInfo.correlativas?.paraRendir?.length && (
+                <p className="text-center text-slate-500 text-sm py-4">
+                  Esta materia no requiere correlativas.
+                </p>
+              )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
