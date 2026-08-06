@@ -2,12 +2,14 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
-
+const cors = require('cors');
 // Conexión centralizada y esquema multitenant definidos en db.js
 const { pool, initSchema } = require('./db.js');
 
 const app = express();
 const port = 3000;
+
+app.use(cors());
 
 // Clave secreta para firmar los JWT.
 // En producción debe salir de una variable de entorno (process.env.JWT_SECRET).
