@@ -651,15 +651,29 @@ app.get('/api/estadisticas/titulo-intermedio', async (req, res) => {
     }
   }
 
+  // Obtenemos el carrera_id del usuario autenticado.
+  // Los usuarios "legacy" (creados antes de la multi-carrera) tienen
+  // carrera_id en null: en ese caso asumimos por defecto carrera_id = 1
+  // (Ingeniería Informática).
+  const usuarioResult = await pool.query(
+    'SELECT carrera_id FROM usuarios WHERE id = $1',
+    [usuario_id]
+  );
+  const usuarioCarrera = usuarioResult.rows[0];
+  const carrera_id = (usuarioCarrera && usuarioCarrera.carrera_id) || 1;
+
   try {
+    // Total de materias del título intermedio (1°, 2° y 3°) que el usuario
+    // NO tiene aprobadas, filtradas a las de SU carrera (m.carrera_id).
     const resultado = await pool.query(`
       SELECT COUNT(*) AS total
       FROM materias m
       LEFT JOIN usuario_materia um
         ON um.materia_id = m.id AND um.usuario_id = $1
       WHERE m.anio IN (1, 2, 3)
+        AND m.carrera_id = $2
         AND COALESCE(um.estado, 'pendiente') != 'aprobada'
-    `, [usuario_id]);
+    `, [usuario_id, carrera_id]);
 
     const total = Number(resultado.rows[0].total);
     res.json({ obtenido: total === 0 });

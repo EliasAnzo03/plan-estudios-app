@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 function Login({ onLogin }) {
   const API_URL = import.meta.env.VITE_BACKEND_URL || ''
@@ -6,9 +6,31 @@ function Login({ onLogin }) {
   const [modo, setModo] = useState('login') // 'login' o 'registro'
   const [usuario, setUsuario] = useState('')
   const [password, setPassword] = useState('')
+  const [carreras, setCarreras] = useState([])
+  const [carreraId, setCarreraId] = useState('')
   const [error, setError] = useState('')
   const [mensaje, setMensaje] = useState('')
   const [cargando, setCargando] = useState(false)
+
+  // Cargar las carreras disponibles al montar el componente, para poder
+  // armar el menú desplegable "Carrera / Plan" del formulario de registro.
+  useEffect(() => {
+    const cargarCarreras = async () => {
+      try {
+        const respuesta = await fetch(`${API_URL}/api/carreras`)
+        const datos = await respuesta.json()
+        if (respuesta.ok) {
+          setCarreras(Array.isArray(datos) ? datos : [])
+        } else {
+          setError(datos.error || 'No se pudieron cargar las carreras')
+        }
+      } catch {
+        setError('Error de red al cargar las carreras')
+      }
+    }
+
+    cargarCarreras()
+  }, [API_URL])
 
   const manejarSubmit = async (e) => {
     e.preventDefault()
@@ -20,15 +42,18 @@ function Login({ onLogin }) {
     const endpoint = esLogin ? '/api/login' : '/api/register'
 
     try {
+      const payload = { username: usuario, password }
+      // En el registro incluimos la carrera elegida en el menú desplegable.
+      if (!esLogin) {
+        payload.carrera_id = carreraId ? Number(carreraId) : null
+      }
+
       const respuesta = await fetch(`${API_URL}${endpoint}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          username: usuario,
-          password,
-        }),
+        body: JSON.stringify(payload),
       })
 
       const datos = await respuesta.json()
@@ -67,6 +92,7 @@ function Login({ onLogin }) {
     setError('')
     setMensaje('')
     setPassword('')
+    setCarreraId('')
   }
 
   return (
@@ -158,6 +184,34 @@ function Login({ onLogin }) {
               className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-3 text-slate-100 placeholder-slate-600 outline-none transition-all duration-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 focus:shadow-[0_0_20px_rgba(99,102,241,0.3)]"
             />
           </div>
+
+          {/* Campo: Carrera / Plan (solo en registro) */}
+          {modo === 'registro' && (
+            <div>
+              <label
+                htmlFor="carrera"
+                className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2"
+              >
+                Carrera / Plan
+              </label>
+              <select
+                id="carrera"
+                value={carreraId}
+                onChange={(e) => setCarreraId(e.target.value)}
+                required
+                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-3 text-slate-100 outline-none transition-all duration-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 focus:shadow-[0_0_20px_rgba(99,102,241,0.3)]"
+              >
+                <option value="" disabled>
+                  Seleccioná tu carrera...
+                </option>
+                {carreras.map((carrera) => (
+                  <option key={carrera.id} value={carrera.id}>
+                    {carrera.nombre} - Plan {carrera.plan}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Mensaje de éxito (solo tras registrarse) */}
           {mensaje && (
