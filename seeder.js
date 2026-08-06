@@ -47,6 +47,9 @@ const materias = [
   { "nro": 40, "nombre": "Proyecto Integrador", "anio": 5, "cuatrimestre": "2", "tipo": "obligatoria", "req_reg_cursar": [], "req_aprob_cursar": [], "req_aprob_rendir": [] }
 ];
 
+// Array de materias de la Licenciatura en Ciencias de la Educación (plan 20/99)
+const materiasEducacion = require('./licenciatura_educacion.js').materiasEducacion;
+
 // Función para convertir el cuatrimestre del JSON al valor numérico que usa la tabla
 // 'A' (anual) → 0, '1' → 1, '2' → 2
 function convertirCuatrimestre(cuatrimestre) {
@@ -69,80 +72,88 @@ async function ejecutarSeed() {
   // Restablecer los contadores de autoincremento (solo de materias)
   await pool.query('ALTER SEQUENCE materias_id_seq RESTART WITH 1');
 
-  // --- MULTICARRERA: insertar la carrera actual y obtener su id ---
-  console.log('Insertando carrera "Ingeniería Informática" (plan 2/25)...');
+  // --- MULTICARRERA: definir las carreras a sembrar con sus respectivas materias ---
+  const carreras = [
+    { nombre: 'Ingeniería Informática', plan: '2/25', materias },
+    { nombre: 'Licenciatura en Ciencias de la Educación', plan: '20/99', materias: materiasEducacion },
+  ];
 
-  await pool.query(`
-    INSERT INTO carreras (nombre, plan)
-    VALUES ($1, $2)
-    ON CONFLICT (nombre, plan) DO NOTHING
-  `, ['Ingeniería Informática', '2/25']);
+  // Mapeo global por carrera: nro de la materia -> id real en la base de datos
+  const mapaIdsPorCarrera = {};
 
-  const carreraRow = await pool.query(
-    'SELECT id FROM carreras WHERE nombre = $1 AND plan = $2',
-    ['Ingeniería Informática', '2/25']
-  );
-  const carreraId = carreraRow.rows[0].id;
-  console.log(`Carrera lista (id=${carreraId})\n`);
+  for (const carrera of carreras) {
+    console.log(`\n--- Procesando carrera: ${carrera.nombre} (plan ${carrera.plan}) ---`);
 
-  // Mapeo en memoria: nro de la materia -> id real en la base de datos
-  const mapaIds = {};
+    await pool.query(`
+      INSERT INTO carreras (nombre, plan)
+      VALUES ($1, $2)
+      ON CONFLICT (nombre, plan) DO NOTHING
+    `, [carrera.nombre, carrera.plan]);
 
-  console.log('Insertando materias (grilla global)...');
-  for (const materia of materias) {
-    const resultado = await pool.query(`
-      INSERT INTO materias (nombre, anio, cuatrimestre, tipo, carrera_id)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING id
-    `, [
-      materia.nombre,
-      materia.anio,
-      convertirCuatrimestre(materia.cuatrimestre),
-      materia.tipo,
-      carreraId
-    ]);
-    mapaIds[materia.nro] = resultado.rows[0].id;
+    const carreraRow = await pool.query(
+      'SELECT id FROM carreras WHERE nombre = $1 AND plan = $2',
+      [carrera.nombre, carrera.plan]
+    );
+    const carreraId = carreraRow.rows[0].id;
+    console.log(`Carrera lista (id=${carreraId})`);
+
+    const mapaIds = {};
+    console.log(`Insertando materias de ${carrera.materias.length} materias...`);
+    for (const materia of carrera.materias) {
+      const resultado = await pool.query(`
+        INSERT INTO materias (nombre, anio, cuatrimestre, tipo, carrera_id)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id
+      `, [
+        materia.nombre,
+        materia.anio,
+        convertirCuatrimestre(materia.cuatrimestre),
+        materia.tipo,
+        carreraId
+      ]);
+      mapaIds[materia.nro] = resultado.rows[0].id;
+    }
+    console.log(`Materias insertadas: ${carrera.materias.length}`);
+    mapaIdsPorCarrera[carreraId] = mapaIds;
+
+    console.log('Insertando requisitos en la tabla correlativas...');
+    let requisitosCount = 0;
+    for (const materia of carrera.materias) {
+      const materiaIdReal = mapaIds[materia.nro];
+
+      // req_reg_cursar: tipo_requisito='para_cursar', condicion_requerida='regular'
+      for (const reqNro of materia.req_reg_cursar) {
+        await pool.query(`
+          INSERT INTO correlativas (materia_id, requiere_id, tipo_requisito, condicion_requerida)
+          VALUES ($1, $2, $3, $4)
+          ON CONFLICT (materia_id, requiere_id, tipo_requisito) DO NOTHING
+        `, [materiaIdReal, mapaIds[reqNro], 'para_cursar', 'regular']);
+        requisitosCount++;
+      }
+
+      // req_aprob_cursar: tipo_requisito='para_cursar', condicion_requerida='aprobada'
+      for (const reqNro of materia.req_aprob_cursar) {
+        await pool.query(`
+          INSERT INTO correlativas (materia_id, requiere_id, tipo_requisito, condicion_requerida)
+          VALUES ($1, $2, $3, $4)
+          ON CONFLICT (materia_id, requiere_id, tipo_requisito) DO NOTHING
+        `, [materiaIdReal, mapaIds[reqNro], 'para_cursar', 'aprobada']);
+        requisitosCount++;
+      }
+
+      // req_aprob_rendir: tipo_requisito='para_rendir', condicion_requerida='aprobada'
+      for (const reqNro of materia.req_aprob_rendir) {
+        await pool.query(`
+          INSERT INTO correlativas (materia_id, requiere_id, tipo_requisito, condicion_requerida)
+          VALUES ($1, $2, $3, $4)
+          ON CONFLICT (materia_id, requiere_id, tipo_requisito) DO NOTHING
+        `, [materiaIdReal, mapaIds[reqNro], 'para_rendir', 'aprobada']);
+        requisitosCount++;
+      }
+    }
+    console.log(`Requisitos insertados: ${requisitosCount}`);
   }
-  console.log(`Materias insertadas: ${materias.length}\n`);
-
-  console.log('Insertando requisitos en la tabla correlativas...');
-  let requisitosCount = 0;
-
-  for (const materia of materias) {
-    const materiaIdReal = mapaIds[materia.nro];
-
-    // req_reg_cursar: tipo_requisito='para_cursar', condicion_requerida='regular'
-    for (const reqNro of materia.req_reg_cursar) {
-      await pool.query(`
-        INSERT INTO correlativas (materia_id, requiere_id, tipo_requisito, condicion_requerida)
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT (materia_id, requiere_id, tipo_requisito) DO NOTHING
-      `, [materiaIdReal, mapaIds[reqNro], 'para_cursar', 'regular']);
-      requisitosCount++;
-    }
-
-    // req_aprob_cursar: tipo_requisito='para_cursar', condicion_requerida='aprobada'
-    for (const reqNro of materia.req_aprob_cursar) {
-      await pool.query(`
-        INSERT INTO correlativas (materia_id, requiere_id, tipo_requisito, condicion_requerida)
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT (materia_id, requiere_id, tipo_requisito) DO NOTHING
-      `, [materiaIdReal, mapaIds[reqNro], 'para_cursar', 'aprobada']);
-      requisitosCount++;
-    }
-
-    // req_aprob_rendir: tipo_requisito='para_rendir', condicion_requerida='aprobada'
-    for (const reqNro of materia.req_aprob_rendir) {
-      await pool.query(`
-        INSERT INTO correlativas (materia_id, requiere_id, tipo_requisito, condicion_requerida)
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT (materia_id, requiere_id, tipo_requisito) DO NOTHING
-      `, [materiaIdReal, mapaIds[reqNro], 'para_rendir', 'aprobada']);
-      requisitosCount++;
-    }
-  }
-
-  console.log(`Requisitos insertados: ${requisitosCount}\n`);
+  console.log('');
 
   // --- MULTITENANT: usuario administrador por defecto + asignación de materias ---
 
@@ -174,17 +185,24 @@ async function ejecutarSeed() {
   console.log('Asignando todas las materias al administrador en estado pendiente...');
 
   let asignadasCount = 0;
-  for (const materia of materias) {
-    const materiaIdReal = mapaIds[materia.nro];
-    const resumen = await pool.query(`
-      INSERT INTO usuario_materia (usuario_id, materia_id, estado)
-      VALUES ($1, $2, 'pendiente')
-      ON CONFLICT (usuario_id, materia_id) DO NOTHING
-    `, [adminId, materiaIdReal]);
-    asignadasCount += resumen.rowCount;
+  let totalMaterias = 0;
+  const mapasIds = Object.values(mapaIdsPorCarrera);
+  for (let i = 0; i < carreras.length; i++) {
+    const carrera = carreras[i];
+    const mapaIds = mapasIds[i];
+    for (const materia of carrera.materias) {
+      const materiaIdReal = mapaIds[materia.nro];
+      const resumen = await pool.query(`
+        INSERT INTO usuario_materia (usuario_id, materia_id, estado)
+        VALUES ($1, $2, 'pendiente')
+        ON CONFLICT (usuario_id, materia_id) DO NOTHING
+      `, [adminId, materiaIdReal]);
+      asignadasCount += resumen.rowCount;
+      totalMaterias++;
+    }
   }
 
-  console.log(`Materias asignadas al admin: ${asignadasCount}/${materias.length}\n`);
+  console.log(`Materias asignadas al admin: ${asignadasCount}/${totalMaterias}\n`);
   console.log('=== Seeder completado correctamente ===');
 
   await pool.end();
