@@ -3,18 +3,24 @@ import { useState } from 'react'
 function Login({ onLogin }) {
   const API_URL = import.meta.env.VITE_BACKEND_URL || ''
 
+  const [modo, setModo] = useState('login') // 'login' o 'registro'
   const [usuario, setUsuario] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [mensaje, setMensaje] = useState('')
   const [cargando, setCargando] = useState(false)
 
   const manejarSubmit = async (e) => {
     e.preventDefault()
     setError('')
+    setMensaje('')
     setCargando(true)
 
+    const esLogin = modo === 'login'
+    const endpoint = esLogin ? '/api/login' : '/api/register'
+
     try {
-      const respuesta = await fetch(`${API_URL}/api/login`, {
+      const respuesta = await fetch(`${API_URL}${endpoint}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -28,13 +34,23 @@ function Login({ onLogin }) {
       const datos = await respuesta.json()
 
       if (!respuesta.ok) {
-        // El backend devuelve { error } para credenciales inválidas (401) o campos faltantes (400)
-        setError(datos.error || 'Error al iniciar sesión')
+        setError(datos.error || 'Error al procesar la solicitud')
         setCargando(false)
         return
       }
 
-      // Guardamos token y usuario en localStorage
+      // Registro exitoso: mostramos el mensaje y no iniciamos sesión.
+      if (!esLogin) {
+        setMensaje(
+          datos.message ||
+            '¡Cuenta creada! Esperá a que el administrador la apruebe'
+        )
+        setPassword('')
+        setCargando(false)
+        return
+      }
+
+      // Login exitoso: guardamos token y usuario en localStorage
       localStorage.setItem('token', datos.token)
       localStorage.setItem('usuario', JSON.stringify(datos.usuario))
 
@@ -44,6 +60,13 @@ function Login({ onLogin }) {
       setError('Error de red. Intentalo de nuevo.')
       setCargando(false)
     }
+  }
+
+  const cambiarModo = (nuevoModo) => {
+    setModo(nuevoModo)
+    setError('')
+    setMensaje('')
+    setPassword('')
   }
 
   return (
@@ -60,6 +83,32 @@ function Login({ onLogin }) {
           <p className="text-slate-500 text-sm tracking-widest uppercase mt-2">
             Malla Curricular - Acceso
           </p>
+        </div>
+
+        {/* Toggle: Iniciar Sesión / Registrarse */}
+        <div className="flex bg-slate-900 border border-slate-800 p-1 rounded-lg mb-6">
+          <button
+            type="button"
+            onClick={() => cambiarModo('login')}
+            className={`flex-1 py-2 rounded-md text-sm font-semibold uppercase tracking-wider transition-all duration-300 ${
+              modo === 'login'
+                ? 'bg-indigo-600 text-white shadow-[0_0_15px_rgba(99,102,241,0.4)]'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            Iniciar Sesión
+          </button>
+          <button
+            type="button"
+            onClick={() => cambiarModo('registro')}
+            className={`flex-1 py-2 rounded-md text-sm font-semibold uppercase tracking-wider transition-all duration-300 ${
+              modo === 'registro'
+                ? 'bg-indigo-600 text-white shadow-[0_0_15px_rgba(99,102,241,0.4)]'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            Registrarse
+          </button>
         </div>
 
         {/* Tarjeta del formulario */}
@@ -101,11 +150,21 @@ function Login({ onLogin }) {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
-              autoComplete="current-password"
+              autoComplete={
+                modo === 'login' ? 'current-password' : 'new-password'
+              }
               required
+              minLength={modo === 'registro' ? 6 : undefined}
               className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-3 text-slate-100 placeholder-slate-600 outline-none transition-all duration-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 focus:shadow-[0_0_20px_rgba(99,102,241,0.3)]"
             />
           </div>
+
+          {/* Mensaje de éxito (solo tras registrarse) */}
+          {mensaje && (
+            <p className="text-green-500 text-sm font-medium text-center bg-green-500/10 border border-green-500/30 rounded-lg px-3 py-2">
+              {mensaje}
+            </p>
+          )}
 
           {/* Mensaje de error */}
           {error && (
@@ -114,18 +173,26 @@ function Login({ onLogin }) {
             </p>
           )}
 
-          {/* Botón: Ingresar */}
+          {/* Botón: Ingresar / Registrarse */}
           <button
             type="submit"
             disabled={cargando}
             className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold uppercase tracking-widest rounded-lg px-4 py-3 transition-all duration-300 shadow-[0_0_20px_rgba(99,102,241,0.4)] hover:shadow-[0_0_30px_rgba(99,102,241,0.6)] hover:scale-[1.02] active:scale-[0.98]"
           >
-            {cargando ? 'Ingresando...' : 'Ingresar'}
+            {cargando
+              ? modo === 'login'
+                ? 'Ingresando...'
+                : 'Creando cuenta...'
+              : modo === 'login'
+              ? 'Ingresar'
+              : 'Registrarme'}
           </button>
         </form>
 
         <p className="text-slate-600 text-xs text-center mt-6 font-mono">
-          Sesión protegida · Token de acceso
+          {modo === 'registro'
+            ? 'Tu cuenta quedará pendiente de aprobación por el administrador'
+            : 'Sesión protegida · Token de acceso'}
         </p>
       </div>
     </div>

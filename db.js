@@ -21,7 +21,8 @@ async function initSchema() {
       id SERIAL PRIMARY KEY,
       username TEXT NOT NULL UNIQUE,
       password_hash TEXT NOT NULL,
-      rol TEXT NOT NULL DEFAULT 'user' -- 'admin' o 'user'
+      rol TEXT NOT NULL DEFAULT 'user', -- 'admin' o 'user'
+      is_approved BOOLEAN NOT NULL DEFAULT false -- aprobación del administrador
     );
 
     -- Tabla global/esquemática de materias (compartida por todos los usuarios).

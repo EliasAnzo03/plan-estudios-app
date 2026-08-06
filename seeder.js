@@ -144,8 +144,8 @@ async function ejecutarSeed() {
   // el caso "ya existía", así que primero intentamos insertar y
   // recuperamos el id por username al final.
   await pool.query(`
-    INSERT INTO usuarios (username, password_hash, rol)
-    VALUES ($1, $2, 'admin')
+    INSERT INTO usuarios (username, password_hash, rol, is_approved)
+    VALUES ($1, $2, 'admin', true)
     ON CONFLICT (username) DO NOTHING
   `, [ADMIN_USERNAME, passwordHash]);
 

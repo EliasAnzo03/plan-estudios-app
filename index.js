@@ -35,7 +35,7 @@ app.post('/api/login', async (req, res) => {
 
   try {
     const resultado = await pool.query(
-      'SELECT id, username, password_hash, rol FROM usuarios WHERE username = $1',
+      'SELECT id, username, password_hash, rol, is_approved FROM usuarios WHERE username = $1',
       [username]
     );
     const usuario = resultado.rows[0];
@@ -48,16 +48,63 @@ app.post('/api/login', async (req, res) => {
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
 
+    // Si la cuenta aún no fue aprobada por el administrador, no permitir el ingreso
+    if (!usuario.is_approved) {
+      return res.status(403).json({
+        error: 'Cuenta pendiente de aprobación por el administrador'
+      });
+    }
+
     // Firmamos el token con datos no sensibles del usuario
     const token = jwt.sign(
-      { id: usuario.id, username: usuario.username, rol: usuario.rol },
+      { id: usuario.id, username: usuario.username, rol: usuario.rol, is_approved: usuario.is_approved },
       JWT_SECRET,
       { expiresIn: JWT_EXPIRES_IN }
     );
 
     res.json({
       token,
-      usuario: { id: usuario.id, username: usuario.username, rol: usuario.rol }
+      usuario: { id: usuario.id, username: usuario.username, rol: usuario.rol, is_approved: usuario.is_approved }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// AUTH: POST /api/register
+// Registro público. Crea un usuario con rol 'user' e is_approved = false.
+// Un administrador deberá aprobar la cuenta antes de que pueda iniciar sesión.
+// ---------------------------------------------------------------------------
+app.post('/api/register', async (req, res) => {
+  const { username, password } = req.body;
+
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Username y password son obligatorios' });
+  }
+
+  try {
+    // Evitar duplicados de username
+    const existenteResult = await pool.query(
+      'SELECT id FROM usuarios WHERE username = $1',
+      [username]
+    );
+    if (existenteResult.rows.length > 0) {
+      return res.status(409).json({ error: `El usuario '${username}' ya existe` });
+    }
+
+    const SALT_ROUNDS = 10;
+    const passwordHash = bcrypt.hashSync(password, SALT_ROUNDS);
+
+    // Guardamos el usuario con rol 'user' y sin aprobación (pendiente de admin)
+    await pool.query(`
+      INSERT INTO usuarios (username, password_hash, rol, is_approved)
+      VALUES ($1, $2, 'user', false)
+    `, [username, passwordHash]);
+
+    res.status(201).json({
+      message: 'Cuenta creada. Esperá a que el administrador la apruebe',
+      usuario: { username, rol: 'user', is_approved: false }
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -131,10 +178,10 @@ app.post('/api/admin/usuarios', verificarToken, requiereRol('admin'), async (req
     const SALT_ROUNDS = 10;
     const passwordHash = bcrypt.hashSync(password, SALT_ROUNDS);
 
-    // Creamos el usuario con rol 'user' (invitado)
+    // Creamos el usuario con rol 'user' (invitado) y aprobado (lo da de alta el admin)
     const info = await pool.query(`
-      INSERT INTO usuarios (username, password_hash, rol)
-      VALUES ($1, $2, 'user')
+      INSERT INTO usuarios (username, password_hash, rol, is_approved)
+      VALUES ($1, $2, 'user', true)
       RETURNING id
     `, [username, passwordHash]);
 
@@ -231,6 +278,69 @@ app.get('/api/admin/usuarios', verificarToken, requiereRol('admin'), async (req,
   }
 });
 
+// ---------------------------------------------------------------------------
+// GET /api/admin/users  (solo admin) - Usuarios pendientes de aprobación
+// Devuelve únicamente los usuarios registrados por /api/register que todavía
+// NO fueron aprobados (is_approved = false).
+// ---------------------------------------------------------------------------
+app.get('/api/admin/users', verificarToken, requiereRol('admin'), async (req, res) => {
+  try {
+    const resultado = await pool.query(`
+      SELECT id, username, rol, is_approved
+      FROM usuarios
+      WHERE is_approved = false
+      ORDER BY id ASC
+    `);
+
+    const usuarios = resultado.rows;
+
+    res.json({
+      total: usuarios.length,
+      usuarios
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// PUT /api/admin/users/:id/approve  (solo admin)
+// Aprueba el acceso de un usuario pendiente (cambia is_approved = true).
+// ---------------------------------------------------------------------------
+app.put('/api/admin/users/:id/approve', verificarToken, requiereRol('admin'), async (req, res) => {
+  const { id } = req.params;
+  const usuarioId = Number(id);
+
+  try {
+    const usuarioResult = await pool.query(
+      'SELECT id, username, rol, is_approved FROM usuarios WHERE id = $1',
+      [usuarioId]
+    );
+    const usuario = usuarioResult.rows[0];
+
+    if (!usuario) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+
+    if (usuario.is_approved) {
+      return res.status(400).json({
+        error: `El usuario '${usuario.username}' ya estaba aprobado`
+      });
+    }
+
+    await pool.query(
+      'UPDATE usuarios SET is_approved = true WHERE id = $1',
+      [usuarioId]
+    );
+
+    res.json({
+      message: `Usuario '${usuario.username}' aprobado correctamente`,
+      usuario: { id: usuario.id, username: usuario.username, rol: usuario.rol, is_approved: true }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 // ---------------------------------------------------------------------------
 // GET /api/materias
 // Devuelve la grilla global de materias con el estado INDIVIDUAL del usuario
@@ -476,3 +586,4 @@ app.delete('/api/materias/:id', verificarToken, requiereRol('admin'), async (req
 app.listen(port, () => {
   console.log(`Servidor corriendo en http://localhost:${port}`);
 });
+

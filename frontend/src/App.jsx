@@ -33,6 +33,10 @@ function App() {
 
   const [materias, setMaterias] = useState([])
   const [tituloIntermedio, setTituloIntermedio] = useState(false)
+  const [mostrarPanelAdmin, setMostrarPanelAdmin] = useState(false)
+  const [usuariosPendientes, setUsuariosPendientes] = useState([])
+  const [cargandoPendientes, setCargandoPendientes] = useState(false)
+  const [errorAdmin, setErrorAdmin] = useState('')
   const [token, setToken] = useState(() => localStorage.getItem('token'))
   const [usuario, setUsuario] = useState(() => {
     try {
@@ -53,12 +57,70 @@ function App() {
     setUsuario(null)
     setMaterias([])
     setTituloIntermedio(false)
+    setMostrarPanelAdmin(false)
+    setUsuariosPendientes([])
+    setErrorAdmin('')
   }
 
   // Maneja la sesión tras un login exitoso (se lo pasamos a <Login/>)
   const manejarLogin = (nuevoToken, nuevoUsuario) => {
     setToken(nuevoToken)
     setUsuario(nuevoUsuario)
+  }
+
+  // Carga los usuarios pendientes de aprobación (solo admin)
+  const cargarUsuariosPendientes = async () => {
+    setCargandoPendientes(true)
+    setErrorAdmin('')
+    try {
+      const respuesta = await fetch(`${API_URL}/api/admin/users`, {
+        headers: { Authorization: 'Bearer ' + token },
+      })
+      if (respuesta.status === 401) {
+        desloguear()
+        return
+      }
+      if (!respuesta.ok) {
+        const datos = await respuesta.json()
+        setErrorAdmin(datos.error || 'No se pudieron cargar los usuarios')
+        return
+      }
+      const datos = await respuesta.json()
+      setUsuariosPendientes(datos.usuarios)
+    } catch {
+      setErrorAdmin('Error de red al cargar los usuarios')
+    } finally {
+      setCargandoPendientes(false)
+    }
+  }
+
+  // Aprueba el acceso de un usuario pendiente (solo admin)
+  const aprobarUsuario = async (userId) => {
+    setErrorAdmin('')
+    try {
+      const respuesta = await fetch(
+        `${API_URL}/api/admin/users/${userId}/approve`,
+        {
+          method: 'PUT',
+          headers: { Authorization: 'Bearer ' + token },
+        }
+      )
+      if (respuesta.status === 401) {
+        desloguear()
+        return
+      }
+      if (!respuesta.ok) {
+        const datos = await respuesta.json()
+        setErrorAdmin(datos.error || 'No se pudo aprobar el usuario')
+        return
+      }
+      // Removemos el usuario aprobado de la lista de pendientes
+      setUsuariosPendientes((prev) =>
+        prev.filter((u) => u.id !== userId)
+      )
+    } catch {
+      setErrorAdmin('Error de red al aprobar el usuario')
+    }
   }
 
   // Chequea el error de la respuesta; si es 401, desloguea automáticamente.
@@ -189,6 +251,22 @@ function App() {
               {usuario.username} · {usuario.rol}
             </span>
           )}
+          {usuario && usuario.rol === 'admin' && (
+            <button
+              onClick={() => {
+                const abrir = !mostrarPanelAdmin
+                setMostrarPanelAdmin(abrir)
+                if (abrir) cargarUsuariosPendientes()
+              }}
+              className={`text-xs font-semibold uppercase tracking-wider border rounded-lg px-3 py-1.5 transition-all duration-300 ${
+                mostrarPanelAdmin
+                  ? 'text-indigo-300 border-indigo-500/60 bg-indigo-500/10'
+                  : 'text-slate-500 hover:text-indigo-300 border-slate-800 hover:border-indigo-500/50'
+              }`}
+            >
+              {mostrarPanelAdmin ? 'Cerrar Panel' : 'Panel Admin'}
+            </button>
+          )}
           <button
             onClick={desloguear}
             className="text-xs text-slate-500 hover:text-red-400 border border-slate-800 hover:border-red-500/50 rounded-lg px-3 py-1.5 font-semibold uppercase tracking-wider transition-all duration-300 hover:shadow-[0_0_15px_rgba(239,68,68,0.2)]"
@@ -244,6 +322,85 @@ function App() {
           </div>
         </div>
       </div>
+
+      {/* Panel de administración: usuarios pendientes de aprobación */}
+      {usuario && usuario.rol === 'admin' && mostrarPanelAdmin && (
+        <div className="max-w-6xl mx-auto mb-8">
+          <div className="bg-slate-900 rounded-xl border border-slate-800 shadow-[0_0_25px_rgba(99,102,241,0.1)] p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-indigo-400 font-bold uppercase tracking-widest">
+                Panel Admin - Usuarios pendientes
+              </h2>
+              <button
+                onClick={cargarUsuariosPendientes}
+                disabled={cargandoPendientes}
+                className="text-xs text-slate-500 hover:text-indigo-300 border border-slate-800 hover:border-indigo-500/50 rounded-lg px-3 py-1.5 font-semibold uppercase tracking-wider transition-all duration-300 disabled:opacity-50"
+              >
+                {cargandoPendientes ? 'Cargando...' : 'Actualizar'}
+              </button>
+            </div>
+
+            {errorAdmin && (
+              <p className="text-red-500 text-sm font-medium text-center bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 mb-4">
+                {errorAdmin}
+              </p>
+            )}
+
+            {cargandoPendientes ? (
+              <p className="text-center text-slate-500 text-sm py-8">
+                Cargando usuarios pendientes...
+              </p>
+            ) : usuariosPendientes.length === 0 ? (
+              <p className="text-center text-slate-500 text-sm py-8">
+                No hay usuarios pendientes de aprobación.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="text-slate-500 text-xs uppercase tracking-wider border-b border-slate-800">
+                      <th className="py-2 pr-4">ID</th>
+                      <th className="py-2 pr-4">Usuario</th>
+                      <th className="py-2 pr-4">Rol</th>
+                      <th className="py-2">Estado</th>
+                      <th className="py-2 text-right">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {usuariosPendientes.map((u) => (
+                      <tr
+                        key={u.id}
+                        className="border-b border-slate-800/50 text-slate-300"
+                      >
+                        <td className="py-3 pr-4 font-mono text-slate-500">
+                          {u.id}
+                        </td>
+                        <td className="py-3 pr-4 font-semibold">{u.username}</td>
+                        <td className="py-3 pr-4 uppercase text-xs">
+                          {u.rol}
+                        </td>
+                        <td className="py-3 pr-4">
+                          <span className="text-xs uppercase tracking-wider text-yellow-400 bg-yellow-500/10 border border-yellow-500/30 rounded-full px-2 py-1">
+                            Pendiente
+                          </span>
+                        </td>
+                        <td className="py-3 text-right">
+                          <button
+                            onClick={() => aprobarUsuario(u.id)}
+                            className="text-xs font-semibold uppercase tracking-wider text-green-400 hover:text-green-300 border border-green-500/50 hover:bg-green-500/10 rounded-lg px-3 py-1.5 transition-all duration-300"
+                          >
+                            Aprobar
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {tituloIntermedio && (
         <div className="max-w-6xl mx-auto mb-8">
