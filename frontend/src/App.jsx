@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import Login from './Login.jsx'
 
 const ESTILOS_ESTADO = {
   aprobada: {
@@ -30,9 +31,41 @@ const ESTILOS_ESTADO = {
 function App() {
   const [materias, setMaterias] = useState([])
   const [tituloIntermedio, setTituloIntermedio] = useState(false)
+  const [token, setToken] = useState(() => localStorage.getItem('token'))
+  const [usuario, setUsuario] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('usuario'))
+    } catch {
+      return null
+    }
+  })
 
   // Orden del ciclo de estados: pendiente -> en_curso -> regular -> aprobada -> pendiente
   const ORDEN_CICLO = ['pendiente', 'en_curso', 'regular', 'aprobada']
+
+  // Limpia localStorage y desloguea al usuario (para 401 y cierre de sesión)
+  const desloguear = () => {
+    localStorage.removeItem('token')
+    localStorage.removeItem('usuario')
+    setToken(null)
+    setUsuario(null)
+    setMaterias([])
+    setTituloIntermedio(false)
+  }
+
+  // Maneja la sesión tras un login exitoso (se lo pasamos a <Login/>)
+  const manejarLogin = (nuevoToken, nuevoUsuario) => {
+    setToken(nuevoToken)
+    setUsuario(nuevoUsuario)
+  }
+
+  // Chequea el error de la respuesta; si es 401, desloguea automáticamente.
+  const verificarNoAutorizado = (respuesta) => {
+    if (respuesta.status === 401) {
+      desloguear()
+    }
+    return respuesta
+  }
 
   // Cambia el estado de forma cíclica al hacer clic en una tarjeta
   const ciclarEstadoMateria = async (materia) => {
@@ -40,13 +73,16 @@ function App() {
     const nuevoEstado = ORDEN_CICLO[(indiceActual + 1) % ORDEN_CICLO.length]
 
     try {
-      const respuesta = await fetch(`/api/materias/${materia.id}/estado`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ estado: nuevoEstado }),
-      })
+      const respuesta = await verificarNoAutorizado(
+        await fetch(`/api/materias/${materia.id}/estado`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer ' + token,
+          },
+          body: JSON.stringify({ estado: nuevoEstado }),
+        })
+      )
 
       if (!respuesta.ok) {
         console.error('Error al actualizar el estado')
@@ -105,15 +141,27 @@ function App() {
   }
 
   useEffect(() => {
+    if (!token) return
+
     const cargarDatos = async () => {
       try {
         // Cargar materias
-        const respMaterias = await fetch('/api/materias')
+        const respMaterias = await verificarNoAutorizado(
+          await fetch('/api/materias', {
+            headers: { Authorization: 'Bearer ' + token },
+          })
+        )
+        if (!respMaterias.ok) return
         const datos = await respMaterias.json()
         setMaterias(datos)
 
         // Chequear si se obtuvo el título intermedio
-        const respTitulo = await fetch('/api/estadisticas/titulo-intermedio')
+        const respTitulo = await verificarNoAutorizado(
+          await fetch('/api/estadisticas/titulo-intermedio', {
+            headers: { Authorization: 'Bearer ' + token },
+          })
+        )
+        if (!respTitulo.ok) return
         const titulo = await respTitulo.json()
         setTituloIntermedio(titulo.obtenido)
       } catch (error) {
@@ -122,10 +170,32 @@ function App() {
     }
 
     cargarDatos()
-  }, [])
+  }, [token])
+
+  // Si NO hay token, mostramos la pantalla de Login
+  if (!token) {
+    return <Login onLogin={manejarLogin} />
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 p-8 text-slate-300">
+      {/* Barra de sesión y Header informativo */}
+      <div className="max-w-6xl mx-auto flex justify-end mb-4">
+        <div className="flex items-center gap-3">
+          {usuario && (
+            <span className="text-slate-500 text-xs font-mono uppercase tracking-wider">
+              {usuario.username} · {usuario.rol}
+            </span>
+          )}
+          <button
+            onClick={desloguear}
+            className="text-xs text-slate-500 hover:text-red-400 border border-slate-800 hover:border-red-500/50 rounded-lg px-3 py-1.5 font-semibold uppercase tracking-wider transition-all duration-300 hover:shadow-[0_0_15px_rgba(239,68,68,0.2)]"
+          >
+            Cerrar Sesión
+          </button>
+        </div>
+      </div>
+
       {/* Header informativo */}
       <div className="flex flex-col items-center mb-10 gap-2">
         <h1 className="text-indigo-500 text-2xl font-bold tracking-[0.3em] drop-shadow-md uppercase">

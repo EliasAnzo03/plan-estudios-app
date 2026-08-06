@@ -1,40 +1,21 @@
 const express = require('express');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+require('dotenv').config();
 
-
-const Database = require('better-sqlite3');
+// Conexión centralizada y esquema multitenant definidos en db.js
+const { pool, initSchema } = require('./db.js');
 
 const app = express();
 const port = 3000;
 
-// Configuración de la base de datos
-const db = new Database('carrera.db');
+// Clave secreta para firmar los JWT.
+// En producción debe salir de una variable de entorno (process.env.JWT_SECRET).
+const JWT_SECRET = process.env.JWT_SECRET || 'clave_secreta_de_desarrollo';
+const JWT_EXPIRES_IN = '8h';
 
-// Habilitar claves foráneas
-db.pragma('foreign_keys = ON');
-
-// Crear tablas si no existen
-db.exec(`
-  CREATE TABLE IF NOT EXISTS materias (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nombre TEXT NOT NULL,
-    anio INTEGER NOT NULL,
-    cuatrimestre INTEGER NOT NULL, -- 0 para anual, 1 o 2 para cuatrimestral
-    estado TEXT DEFAULT 'pendiente',
-    nota INTEGER,
-    es_optativa BOOLEAN DEFAULT 0,
-    creditos INTEGER DEFAULT 0
-  );
-
-  CREATE TABLE IF NOT EXISTS correlativas (
-    materia_id INTEGER NOT NULL,
-    requiere_id INTEGER NOT NULL,
-    tipo_requisito TEXT NOT NULL, -- 'para_cursar' o 'para_rendir'
-    condicion_requerida TEXT NOT NULL, -- 'regular' o 'aprobada'
-    FOREIGN KEY (materia_id) REFERENCES materias(id),
-    FOREIGN KEY (requiere_id) REFERENCES materias(id),
-    PRIMARY KEY (materia_id, requiere_id, tipo_requisito)
-  );
-`);
+// Estados válidos para una materia
+const ESTADOS_VALIDOS = ['pendiente', 'en_curso', 'regular', 'aprobada'];
 
 // Middleware para parsear JSON
 app.use(express.json());
@@ -42,20 +23,243 @@ app.use(express.json());
 // Servir archivos estáticos
 app.use(express.static('public'));
 
-// GET: Obtener todas las materias con sus correlativas y nombres
-app.get('/api/materias', (req, res) => {
+// ---------------------------------------------------------------------------
+// AUTH: POST /api/login
+// ---------------------------------------------------------------------------
+app.post('/api/login', async (req, res) => {
+  const { username, password } = req.body;
+
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Username y password son obligatorios' });
+  }
+
   try {
-    const sqlMaterias = `SELECT * FROM materias ORDER BY anio ASC, cuatrimestre ASC`;
-    // Consulta única para todas las correlativas (evita el problema N+1)
+    const resultado = await pool.query(
+      'SELECT id, username, password_hash, rol FROM usuarios WHERE username = $1',
+      [username]
+    );
+    const usuario = resultado.rows[0];
+
+    // Verificación de la contraseña (bcrypt iguala el hash)
+    const passwordCorrecta =
+      usuario && bcrypt.compareSync(password, usuario.password_hash);
+
+    if (!usuario || !passwordCorrecta) {
+      return res.status(401).json({ error: 'Credenciales inválidas' });
+    }
+
+    // Firmamos el token con datos no sensibles del usuario
+    const token = jwt.sign(
+      { id: usuario.id, username: usuario.username, rol: usuario.rol },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN }
+    );
+
+    res.json({
+      token,
+      usuario: { id: usuario.id, username: usuario.username, rol: usuario.rol }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// MIDDLEWARE: verificarToken
+// Intercepta las peticiones, valida el JWT del header Authorization y
+// "inyecta" el usuario_id (y el resto del payload) en la request.
+// ---------------------------------------------------------------------------
+function verificarToken(req, res, next) {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Token no proporcionado' });
+  }
+
+  const token = authHeader.split(' ')[1];
+
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    // Inyectamos el usuario autenticado en la request
+    req.usuarioId = payload.id;
+    req.usuario = payload;
+    next();
+  } catch (error) {
+    return res.status(401).json({ error: 'Token inválido o expirado' });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// MIDDLEWARE: requiereRol
+// Debe ejecutarse DESPUÉS de verificarToken. Valida que el rol del usuario
+// autenticado (req.usuario.rol) coincida con el esperado por la ruta.
+// ---------------------------------------------------------------------------
+function requiereRol(rolEsperado) {
+  return (req, res, next) => {
+  // req.usuario lo inyecta verificarToken
+  if (!req.usuario || req.usuario.rol !== rolEsperado) {
+    return res.status(403).json({ error: `Acceso denegado. Se requiere rol '${rolEsperado}'` });
+  }
+  next();
+  };
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/admin/usuarios  (solo admin) - Sistema Invite-Only
+// El admin crea la cuenta de un compañero con rol 'user'. El sistema es
+// cerrado: no hay registro público, solo el admin puede dar de alta usuarios.
+// Al crearse, se le asignan automáticamente todas las materias existentes
+// con estado 'pendiente'.
+// ---------------------------------------------------------------------------
+app.post('/api/admin/usuarios', verificarToken, requiereRol('admin'), async (req, res) => {
+  const { username, password } = req.body;
+
+  if (!username || !password) {
+  return res.status(400).json({ error: 'Username y password son obligatorios' });
+  }
+
+  try {
+    // Evitar duplicados de username
+    const existenteResult = await pool.query(
+      'SELECT id FROM usuarios WHERE username = $1',
+      [username]
+    );
+    if (existenteResult.rows.length > 0) {
+      return res.status(409).json({ error: `El usuario '${username}' ya existe` });
+    }
+
+    const SALT_ROUNDS = 10;
+    const passwordHash = bcrypt.hashSync(password, SALT_ROUNDS);
+
+    // Creamos el usuario con rol 'user' (invitado)
+    const info = await pool.query(`
+      INSERT INTO usuarios (username, password_hash, rol)
+      VALUES ($1, $2, 'user')
+      RETURNING id
+    `, [username, passwordHash]);
+
+    const nuevoUsuarioId = info.rows[0].id;
+
+    // Asignación inicial: todas las materias existentes en estado 'pendiente'
+    const materiasResult = await pool.query('SELECT id FROM materias');
+    const materias = materiasResult.rows;
+
+    let materiasAsignadas = 0;
+    for (const materia of materias) {
+      const resumen = await pool.query(`
+        INSERT INTO usuario_materia (usuario_id, materia_id, estado)
+        VALUES ($1, $2, 'pendiente')
+        ON CONFLICT (usuario_id, materia_id) DO NOTHING
+      `, [nuevoUsuarioId, materia.id]);
+      materiasAsignadas += resumen.rowCount;
+    }
+
+    res.status(201).json({
+      message: 'Usuario creado correctamente',
+      usuario: { id: nuevoUsuarioId, username, rol: 'user' },
+      materias_asignadas: materiasAsignadas
+    });
+  } catch (error) {
+  res.status(500).json({ error: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// DELETE /api/admin/usuarios/:id  (solo admin) - Baja de usuario / revocar acceso
+// Elimina a un usuario del sistema (Invite-Only: el admin controla el alta
+// y la baja). Las filas de usuario_materia del usuario se borran
+// automáticamente gracias al ON DELETE CASCADE de la FK.
+// ---------------------------------------------------------------------------
+app.delete('/api/admin/usuarios/:id', verificarToken, requiereRol('admin'), async (req, res) => {
+  const { id } = req.params;
+  const usuarioId = Number(id);
+
+  try {
+    // Evitar que el admin se elimine a sí mismo (quedaría sin administrador)
+    if (usuarioId === req.usuarioId) {
+      return res.status(400).json({ error: 'No podés eliminar tu propia cuenta de administrador' });
+    }
+
+    const usuarioResult = await pool.query(
+      'SELECT id, username, rol FROM usuarios WHERE id = $1',
+      [usuarioId]
+    );
+    const usuario = usuarioResult.rows[0];
+    if (!usuario) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+
+    // El DELETE en cascada elimina también sus registros en usuario_materia.
+    // Eliminamos primero usuario_materia por seguridad explícita aunque la FK
+    // ya lo manejase, y después el usuario.
+    await pool.query('DELETE FROM usuario_materia WHERE usuario_id = $1', [usuarioId]);
+    await pool.query('DELETE FROM usuarios WHERE id = $1', [usuarioId]);
+
+    res.json({
+      message: `Usuario '${usuario.username}' eliminado correctamente`,
+      usuario: { id: usuario.id, username: usuario.username, rol: usuario.rol }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/admin/usuarios  (solo admin) - Listado de usuarios del sistema
+// Devuelve todos los usuarios dados de alta, con un resumen de su progreso
+// (materias asignadas y aprobadas). Pensado para que el admin gestione
+// (ver, eliminar) a los compañeros en el sistema Invite-Only.
+// ---------------------------------------------------------------------------
+app.get('/api/admin/usuarios', verificarToken, requiereRol('admin'), async (req, res) => {
+  try {
+    const resultado = await pool.query(`
+      SELECT u.id, u.username, u.rol,
+             (SELECT COUNT(*) FROM usuario_materia um WHERE um.usuario_id = u.id) AS materias_totales,
+             (SELECT COUNT(*) FROM usuario_materia um
+               WHERE um.usuario_id = u.id AND um.estado = 'aprobada') AS materias_aprobadas
+      FROM usuarios u
+      ORDER BY u.id ASC
+    `);
+    const usuarios = resultado.rows;
+
+    res.json({
+      total: usuarios.length,
+      usuarios
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/materias
+// Devuelve la grilla global de materias con el estado INDIVIDUAL del usuario
+// autenticado (LEFT JOIN con usuario_materia, filtrado por req.usuarioId).
+// ---------------------------------------------------------------------------
+app.get('/api/materias', verificarToken, async (req, res) => {
+  try {
+    const usuario_id = req.usuarioId;
+
+    // LEFT JOIN: si el usuario no tiene registro en usuario_materia,
+    // COALESCE devuelve 'pendiente' como estado por defecto.
+    const sqlMaterias = `
+      SELECT m.id, m.nombre, m.anio, m.cuatrimestre, m.tipo,
+             COALESCE(um.estado, 'pendiente') AS estado
+      FROM materias m
+      LEFT JOIN usuario_materia um
+        ON um.materia_id = m.id AND um.usuario_id = $1
+      ORDER BY m.anio ASC, m.cuatrimestre ASC
+    `;
     const sqlCorrelativas = `
       SELECT materia_id, requiere_id
       FROM correlativas
       ORDER BY materia_id
     `;
 
-    // Con better-sqlite3 usamos prepare().all() de forma sincrónica
-    const materias = db.prepare(sqlMaterias).all();
-    const correlativas = db.prepare(sqlCorrelativas).all();
+    const materiasResult = await pool.query(sqlMaterias, [usuario_id]);
+    const correlativasResult = await pool.query(sqlCorrelativas);
+    const materias = materiasResult.rows;
+    const correlativas = correlativasResult.rows;
 
     // Agrupamos los IDs de requisitos por materia de una sola pasada
     const requisitosPorMateria = new Map();
@@ -81,53 +285,148 @@ app.get('/api/materias', (req, res) => {
   }
 });
 
-// POST /api/materias: Crea una nueva materia
-app.post('/api/materias', (req, res) => {
-  const { nombre, anio, cuatrimestre, es_optativa, creditos } = req.body;
+// ---------------------------------------------------------------------------
+// PATCH /api/materias/:id/estado
+// Inserta o actualiza el estado EXCLUSIVAMENTE en usuario_materia, siempre
+// con el usuario_id del token. UPSERT mediante ON CONFLICT.
+// ---------------------------------------------------------------------------
+app.patch('/api/materias/:id/estado', verificarToken, async (req, res) => {
+  const { id } = req.params;
+  const { estado } = req.body;
+  const usuario_id = req.usuarioId;
+
+  if (!ESTADOS_VALIDOS.includes(estado)) {
+    return res.status(400).json({
+      error: `Estado inválido. Debe ser ${ESTADOS_VALIDOS.join(', ')}`
+    });
+  }
+
+  try {
+    // Verificamos que la materia exista en la grilla global
+    const materiaResult = await pool.query(
+      'SELECT id FROM materias WHERE id = $1',
+      [id]
+    );
+    if (materiaResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Materia no encontrada' });
+    }
+
+    // UPSERT: inserta si no existe la dupla (usuario_id, materia_id),
+    // o actualiza el estado si ya existía.
+    await pool.query(`
+      INSERT INTO usuario_materia (usuario_id, materia_id, estado)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (usuario_id, materia_id)
+      DO UPDATE SET estado = excluded.estado
+    `, [usuario_id, Number(id), estado]);
+
+    res.json({ message: 'Estado actualizado correctamente', estado, materia_id: Number(id) });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/materias/:id/correlativas
+// Devuelve las materias requisito para cursar la consultada, con el estado
+// individual del usuario autenticado.
+// ---------------------------------------------------------------------------
+app.get('/api/materias/:id/correlativas', verificarToken, async (req, res) => {
+  const { id } = req.params;
+  const usuario_id = req.usuarioId;
+
+  try {
+    const resultado = await pool.query(`
+      SELECT m.id, m.nombre, m.anio, m.cuatrimestre, m.tipo,
+             COALESCE(um.estado, 'pendiente') AS estado
+      FROM correlativas c
+      JOIN materias m ON c.requiere_id = m.id
+      LEFT JOIN usuario_materia um
+        ON um.materia_id = m.id AND um.usuario_id = $1
+      WHERE c.materia_id = $2
+    `, [usuario_id, id]);
+
+    res.json(resultado.rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/estadisticas/titulo-intermedio
+// Verifica si todas las materias de 1°, 2° y 3° del USUARIO están aprobadas.
+// ---------------------------------------------------------------------------
+app.get('/api/estadisticas/titulo-intermedio', verificarToken, async (req, res) => {
+  const usuario_id = req.usuarioId;
+
+  try {
+    const resultado = await pool.query(`
+      SELECT COUNT(*) AS total
+      FROM materias m
+      LEFT JOIN usuario_materia um
+        ON um.materia_id = m.id AND um.usuario_id = $1
+      WHERE m.anio IN (1, 2, 3)
+        AND COALESCE(um.estado, 'pendiente') != 'aprobada'
+    `, [usuario_id]);
+
+    const total = Number(resultado.rows[0].total);
+    res.json({ obtenido: total === 0 });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Rutas de administración de la grilla global (protegidas con token)
+// ---------------------------------------------------------------------------
+
+// POST /api/materias: Crea una nueva materia en la grilla global (solo admin)
+app.post('/api/materias', verificarToken, requiereRol('admin'), async (req, res) => {
+  const { nombre, anio, cuatrimestre, tipo = 'obligatoria' } = req.body;
+
   if (!nombre || anio === undefined || cuatrimestre === undefined) {
     return res.status(400).json({ error: 'Nombre, año y cuatrimestre son obligatorios' });
   }
-  
+
   try {
-    // Función para normalizar nombres: quita tildes y pasa a minúsculas
     const normalizar = (texto) =>
       texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
     const nombreNormalizado = normalizar(nombre);
-
-    // Obtenemos todas las materias existentes y comparamos los nombres normalizados
-    const existentes = db.prepare('SELECT nombre FROM materias').all();
-    const duplicado = existentes.some(
-      (m) => normalizar(m.nombre) === nombreNormalizado
-    );
+    const existentesResult = await pool.query('SELECT nombre FROM materias');
+    const existentes = existentesResult.rows;
+    const duplicado = existentes.some((m) => normalizar(m.nombre) === nombreNormalizado);
 
     if (duplicado) {
       return res.status(400).json({ error: 'La materia ya existe' });
     }
 
-    const info = db.prepare(`
-      INSERT INTO materias (nombre, anio, cuatrimestre, es_optativa, creditos) 
-      VALUES (?, ?, ?, ?, ?)
-    `).run(nombre, anio, cuatrimestre, es_optativa || 0, creditos || 0);
-    
-    res.status(201).json({ 
-      id: info.lastInsertRowid, 
-      nombre, 
-      anio, 
-      cuatrimestre, 
-      estado: 'pendiente' 
+    const info = await pool.query(`
+      INSERT INTO materias (nombre, anio, cuatrimestre, tipo)
+      VALUES ($1, $2, $3, $4)
+      RETURNING id
+    `, [nombre, anio, cuatrimestre, tipo]);
+
+    res.status(201).json({
+      id: info.rows[0].id,
+      nombre,
+      anio,
+      cuatrimestre,
+      tipo
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// POST /api/correlativas: Guarda la relación entre materias con tipo y condición
-app.post('/api/correlativas', (req, res) => {
+// POST /api/correlativas: Guarda la relación entre materias con tipo y condición (solo admin)
+app.post('/api/correlativas', verificarToken, requiereRol('admin'), async (req, res) => {
   const { materia_id, requiere_id, tipo_requisito, condicion_requerida } = req.body;
-  
+
   if (!materia_id || !requiere_id || !tipo_requisito || !condicion_requerida) {
-    return res.status(400).json({ error: 'Todos los campos son obligatorios: materia_id, requiere_id, tipo_requisito, condicion_requerida' });
+    return res.status(400).json({
+      error: 'Todos los campos son obligatorios: materia_id, requiere_id, tipo_requisito, condicion_requerida'
+    });
   }
 
   const tiposValidos = ['para_cursar', 'para_rendir'];
@@ -138,55 +437,34 @@ app.post('/api/correlativas', (req, res) => {
   }
 
   try {
-    db.prepare(`
-      INSERT INTO correlativas (materia_id, requiere_id, tipo_requisito, condicion_requerida) 
-      VALUES (?, ?, ?, ?)
-    `).run(materia_id, requiere_id, tipo_requisito, condicion_requerida);
-    
+    await pool.query(`
+      INSERT INTO correlativas (materia_id, requiere_id, tipo_requisito, condicion_requerida)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (materia_id, requiere_id, tipo_requisito) DO NOTHING
+    `, [materia_id, requiere_id, tipo_requisito, condicion_requerida]);
+
     res.status(201).json({ message: 'Relación de correlatividad creada' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// PATCH /api/materias/:id/estado: Actualiza el estado de una materia
-app.patch('/api/materias/:id/estado', (req, res) => {
-  const { id } = req.params;
-  const { estado } = req.body;
-  const estadosValidos = ['pendiente', 'en_curso', 'regular', 'aprobada'];
-
-  if (!estadosValidos.includes(estado)) {
-    return res.status(400).json({ error: 'Estado inválido. Debe ser pendiente, en_curso, regular o aprobada' });
-  }
-
-  try {
-    const result = db.prepare('UPDATE materias SET estado = ? WHERE id = ?').run(estado, id);
-    if (result.changes === 0) {
-      return res.status(404).json({ error: 'Materia no encontrada' });
-    }
-    res.json({ message: 'Estado actualizado correctamente' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// DELETE /api/materias/:id: Elimina una materia y sus correlativas asociadas
-app.delete('/api/materias/:id', (req, res) => {
+// DELETE /api/materias/:id: Elimina una materia y sus correlativas asociadas (solo admin)
+app.delete('/api/materias/:id', verificarToken, requiereRol('admin'), async (req, res) => {
   const { id } = req.params;
 
   try {
-    // Verificamos que la materia exista
-    const materia = db.prepare('SELECT id FROM materias WHERE id = ?').get(id);
-    if (!materia) {
+    const materiaResult = await pool.query(
+      'SELECT id FROM materias WHERE id = $1',
+      [id]
+    );
+    if (materiaResult.rows.length === 0) {
       return res.status(404).json({ error: 'Materia no encontrada' });
     }
 
-    // Eliminamos las correlativas en las que la materia interviene (como materia o como requisito)
-    db.prepare('DELETE FROM correlativas WHERE materia_id = ? OR requiere_id = ?')
-      .run(id, id);
-
-    // Eliminamos la materia
-    db.prepare('DELETE FROM materias WHERE id = ?').run(id);
+    await pool.query('DELETE FROM correlativas WHERE materia_id = $1 OR requiere_id = $1', [id]);
+    await pool.query('DELETE FROM usuario_materia WHERE materia_id = $1', [id]);
+    await pool.query('DELETE FROM materias WHERE id = $1', [id]);
 
     res.json({ message: 'Materia eliminada correctamente' });
   } catch (error) {
@@ -194,41 +472,7 @@ app.delete('/api/materias/:id', (req, res) => {
   }
 });
 
-// GET /api/materias/:id/correlativas: Devuelve las materias que son requisito para cursar la materia solicitada
-app.get('/api/materias/:id/correlativas', (req, res) => {
-  const { id } = req.params;
-
-  try {
-    const correlativas = db.prepare(`
-      SELECT m.id, m.nombre, m.anio, m.cuatrimestre, m.estado
-      FROM correlativas c
-      JOIN materias m ON c.requiere_id = m.id
-      WHERE c.materia_id = ?
-    `).all(id);
-
-    res.json(correlativas);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// GET /api/estadisticas/titulo-intermedio: Verifica si todas las materias de 1°, 2° y 3° están aprobadas
-app.get('/api/estadisticas/titulo-intermedio', (req, res) => {
-  try {
-    const pendientes = db.prepare(`
-      SELECT COUNT(*) AS total
-      FROM materias
-      WHERE anio IN (1, 2, 3) AND estado != 'aprobada'
-    `).get();
-
-    // El título se obtiene si no hay ninguna materia pendiente entre los años 1, 2 y 3
-    res.json({ obtenido: pendientes.total === 0 });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Iniciar el servidor
+// Inicializar el esquema y luego iniciar el servidor
 app.listen(port, () => {
   console.log(`Servidor corriendo en http://localhost:${port}`);
 });
