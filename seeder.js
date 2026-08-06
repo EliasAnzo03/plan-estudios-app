@@ -59,18 +59,16 @@ function convertirCuatrimestre(cuatrimestre) {
 
 async function ejecutarSeed() {
   // 1. Comentamos la creación del esquema porque las tablas ya existen en Neon
+  // initSchema() es seguro (usa CREATE TABLE IF NOT EXISTS y migraciones idempotentes).
   await initSchema();
 
-  console.log('=== Iniciando seeder ===\n');
+  console.log('=== Iniciando seeder (modo NO destructivo / idempotente) ===\n');
 
-  // 2. Comentamos el borrado de usuarios para NO perder tu cuenta Admin
-  await pool.query('DELETE FROM usuario_materia');
-  await pool.query('DELETE FROM correlativas');
-  await pool.query('DELETE FROM materias');
-  // await pool.query('DELETE FROM usuarios'); <--- COMENTÁ ESTA TAMBIÉN
-
-  // Restablecer los contadores de autoincremento (solo de materias)
-  await pool.query('ALTER SEQUENCE materias_id_seq RESTART WITH 1');
+  // NOTA IMPORTANTE: este seeder es 100% NO destructivo.
+  // - NO se borran carreras, materias ni correlativas.
+  // - NO se reinicia ningún contador de secuencia (ALTER SEQUENCE).
+  // - NO se toca ninguna tabla de usuarios, roles, parciales ni las relaciones
+  //   usuario_materia que ya existan. Solo se AGREGAN los datos que falten.
 
   // --- MULTICARRERA: definir las carreras a sembrar con sus respectivas materias ---
   const carreras = [
@@ -84,39 +82,65 @@ async function ejecutarSeed() {
   for (const carrera of carreras) {
     console.log(`\n--- Procesando carrera: ${carrera.nombre} (plan ${carrera.plan}) ---`);
 
-    await pool.query(`
-      INSERT INTO carreras (nombre, plan)
-      VALUES ($1, $2)
-      ON CONFLICT (nombre, plan) DO NOTHING
-    `, [carrera.nombre, carrera.plan]);
-
-    const carreraRow = await pool.query(
+    // VERIFICAR primero si la carrera ya existe (upsert no destructivo).
+    let carreraRow = await pool.query(
       'SELECT id FROM carreras WHERE nombre = $1 AND plan = $2',
       [carrera.nombre, carrera.plan]
     );
-    const carreraId = carreraRow.rows[0].id;
-    console.log(`Carrera lista (id=${carreraId})`);
+
+    let carreraId;
+    if (carreraRow.rows.length > 0) {
+      // Ya existe: recuperamos su id sin re-insertarla.
+      carreraId = carreraRow.rows[0].id;
+      console.log(`Carrera ya existente (id=${carreraId}), no se vuelve a insertar`);
+    } else {
+      const ins = await pool.query(`
+        INSERT INTO carreras (nombre, plan)
+        VALUES ($1, $2)
+        RETURNING id
+      `, [carrera.nombre, carrera.plan]);
+      carreraId = ins.rows[0].id;
+      console.log(`Carrera creada (id=${carreraId})`);
+    }
 
     const mapaIds = {};
-    console.log(`Insertando materias de ${carrera.materias.length} materias...`);
+    let nuevasMaterias = 0;
+    console.log(`Sincronizando materias de ${carrera.materias.length} materias...`);
     for (const materia of carrera.materias) {
-      const resultado = await pool.query(`
-        INSERT INTO materias (nombre, anio, cuatrimestre, tipo, carrera_id)
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING id
-      `, [
-        materia.nombre,
-        materia.anio,
-        convertirCuatrimestre(materia.cuatrimestre),
-        materia.tipo,
-        carreraId
-      ]);
-      mapaIds[materia.nro] = resultado.rows[0].id;
+      // VERIFICAR primero si la materia ya existe para esta carrera.
+      // Como NO hay una constraint UNIQUE sobre (nombre, carrera_id) en la tabla,
+      // hacemos un SELECT y reutilizamos el id existente si lo hay.
+      let materiaRow = await pool.query(
+        'SELECT id FROM materias WHERE nombre = $1 AND carrera_id = $2',
+        [materia.nombre, carreraId]
+      );
+
+      let materiaId;
+      if (materiaRow.rows.length > 0) {
+        // Ya existe: reutilizamos su id (así mantenemos referencias estables).
+        materiaId = materiaRow.rows[0].id;
+      } else {
+        const resultado = await pool.query(`
+          INSERT INTO materias (nombre, anio, cuatrimestre, tipo, carrera_id)
+          VALUES ($1, $2, $3, $4, $5)
+          RETURNING id
+        `, [
+          materia.nombre,
+          materia.anio,
+          convertirCuatrimestre(materia.cuatrimestre),
+          materia.tipo,
+          carreraId
+        ]);
+        materiaId = resultado.rows[0].id;
+        nuevasMaterias++;
+      }
+      mapaIds[materia.nro] = materiaId;
     }
-    console.log(`Materias insertadas: ${carrera.materias.length}`);
+    console.log(`Materias nuevas insertadas: ${nuevasMaterias}/${carrera.materias.length}`);
     mapaIdsPorCarrera[carreraId] = mapaIds;
 
-    console.log('Insertando requisitos en la tabla correlativas...');
+    // --- CORRELATIVAS: idempotentes gracias a la PRIMARY KEY (materia_id, requiere_id, tipo_requisito) ---
+    console.log('Sincronizando requisitos en la tabla correlativas...');
     let requisitosCount = 0;
     for (const materia of carrera.materias) {
       const materiaIdReal = mapaIds[materia.nro];
@@ -151,40 +175,45 @@ async function ejecutarSeed() {
         requisitosCount++;
       }
     }
-    console.log(`Requisitos insertados: ${requisitosCount}`);
+    console.log(`Requisitos sincronizados (procesados): ${requisitosCount}`);
   }
   console.log('');
 
   // --- MULTITENANT: usuario administrador por defecto + asignación de materias ---
 
-  console.log('Creando usuario administrador por defecto...');
+  // NUEVO: si el admin ya existe, NO pisamos su contraseña ni sus datos.
+  console.log('Verificando/creando usuario administrador por defecto...');
 
   const ADMIN_USERNAME = 'admin';
   const ADMIN_PASSWORD = '123456'; // Solo para desarrollo - cambiar en producción
   const SALT_ROUNDS = 10;
 
-  const passwordHash = bcrypt.hashSync(ADMIN_PASSWORD, SALT_ROUNDS);
-
-  // Se usa ON CONFLICT DO NOTHING para no fallar si el admin ya existe.
-  // No podemos usar RETURNING junto a DO NOTHING sin poder distinguir fácilmente
-  // el caso "ya existía", así que primero intentamos insertar y
-  // recuperamos el id por username al final.
-  await pool.query(`
-    INSERT INTO usuarios (username, password_hash, rol, is_approved)
-    VALUES ($1, $2, 'admin', true)
-    ON CONFLICT (username) DO NOTHING
-  `, [ADMIN_USERNAME, passwordHash]);
-
-  const adminResult = await pool.query(
+  let adminRow = await pool.query(
     'SELECT id FROM usuarios WHERE username = $1',
     [ADMIN_USERNAME]
   );
-  const adminId = adminResult.rows[0].id;
-  console.log(`Usuario administrador '${ADMIN_USERNAME}' listo (id=${adminId})`);
 
-  console.log('Asignando todas las materias al administrador en estado pendiente...');
+  let adminId;
+  if (adminRow.rows.length > 0) {
+    // El usuario ya existe: NO tocamos su hash ni sus datos.
+    adminId = adminRow.rows[0].id;
+    console.log(`Usuario administrador '${ADMIN_USERNAME}' ya existía (id=${adminId}), se conserva tal cual`);
+  } else {
+    const passwordHash = bcrypt.hashSync(ADMIN_PASSWORD, SALT_ROUNDS);
+    const ins = await pool.query(`
+      INSERT INTO usuarios (username, password_hash, rol, is_approved)
+      VALUES ($1, $2, 'admin', true)
+      RETURNING id
+    `, [ADMIN_USERNAME, passwordHash]);
+    adminId = ins.rows[0].id;
+    console.log(`Usuario administrador '${ADMIN_USERNAME}' creado (id=${adminId})`);
+  }
+
+  // Asignamos las materias al admin solo si no están asignadas (ON CONFLICT DO NOTHING).
+  console.log('Asignando materias al administrador (solo las que falten, en estado pendiente)...');
 
   let asignadasCount = 0;
+  let yaAsignadasCount = 0;
   let totalMaterias = 0;
   const mapasIds = Object.values(mapaIdsPorCarrera);
   for (let i = 0; i < carreras.length; i++) {
@@ -197,13 +226,18 @@ async function ejecutarSeed() {
         VALUES ($1, $2, 'pendiente')
         ON CONFLICT (usuario_id, materia_id) DO NOTHING
       `, [adminId, materiaIdReal]);
-      asignadasCount += resumen.rowCount;
+      if (resumen.rowCount > 0) {
+        asignadasCount++;
+      } else {
+        yaAsignadasCount++;
+      }
       totalMaterias++;
     }
   }
 
-  console.log(`Materias asignadas al admin: ${asignadasCount}/${totalMaterias}\n`);
-  console.log('=== Seeder completado correctamente ===');
+  console.log(`Materias nuevas asignadas al admin: ${asignadasCount}/${totalMaterias}`);
+  console.log(`Materias ya asignadas (sin tocar): ${yaAsignadasCount}`);
+  console.log('\n=== Seeder completado correctamente (sin pérdida de datos) ===');
 
   await pool.end();
 }
