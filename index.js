@@ -287,12 +287,17 @@ app.delete('/api/admin/usuarios/:id', verificarToken, requiereRol('admin'), asyn
 // ---------------------------------------------------------------------------
 app.get('/api/admin/usuarios', verificarToken, requiereRol('admin'), async (req, res) => {
   try {
+    // Devuelve SOLO los usuarios aprobados (is_approved = true), con un LEFT JOIN
+    // a carreras para traer el nombre de cada carrera.
     const resultado = await pool.query(`
-      SELECT u.id, u.username, u.rol,
+      SELECT u.id, u.username, u.rol, u.is_approved,
+             c.nombre AS carrera_nombre,
              (SELECT COUNT(*) FROM usuario_materia um WHERE um.usuario_id = u.id) AS materias_totales,
              (SELECT COUNT(*) FROM usuario_materia um
                WHERE um.usuario_id = u.id AND um.estado = 'aprobada') AS materias_aprobadas
       FROM usuarios u
+      LEFT JOIN carreras c ON c.id = u.carrera_id
+      WHERE u.is_approved = true
       ORDER BY u.id ASC
     `);
     const usuarios = resultado.rows;

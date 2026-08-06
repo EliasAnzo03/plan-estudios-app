@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import Login from './Login.jsx'
+import PanelUsuarios from './PanelUsuarios.jsx'
 
 const ESTILOS_ESTADO = {
   aprobada: {
@@ -34,6 +35,7 @@ function App() {
   const [materias, setMaterias] = useState([])
   const [tituloIntermedio, setTituloIntermedio] = useState(false)
   const [mostrarPanelAdmin, setMostrarPanelAdmin] = useState(false)
+  const [mostrarPanelUsuarios, setMostrarPanelUsuarios] = useState(false)
   const [usuariosPendientes, setUsuariosPendientes] = useState([])
   const [cargandoPendientes, setCargandoPendientes] = useState(false)
   const [errorAdmin, setErrorAdmin] = useState('')
@@ -100,6 +102,7 @@ function App() {
     setMaterias([])
     setTituloIntermedio(false)
     setMostrarPanelAdmin(false)
+    setMostrarPanelUsuarios(false)
     setUsuariosPendientes([])
     setErrorAdmin('')
   }
@@ -544,6 +547,18 @@ function App() {
               {mostrarPanelAdmin ? 'Cerrar Panel' : 'Panel Admin'}
             </button>
           )}
+          {!esModoPublico && usuario && usuario.rol === 'admin' && (
+            <button
+              onClick={() => setMostrarPanelUsuarios((abrir) => !abrir)}
+              className={`text-xs font-semibold uppercase tracking-wider border rounded-lg px-3 py-1.5 transition-all duration-300 ${
+                mostrarPanelUsuarios
+                  ? 'text-emerald-300 border-emerald-500/60 bg-emerald-500/10'
+                  : 'text-slate-500 hover:text-emerald-300 border-slate-800 hover:border-emerald-500/50'
+              }`}
+            >
+              {mostrarPanelUsuarios ? 'Cerrar' : 'Panel Usuarios'}
+            </button>
+          )}
           {!esModoPublico && (
             <button
               onClick={desloguear}
@@ -706,6 +721,14 @@ function App() {
           </div>
         </div>
       )}
+
+      {/* Panel de Control de Usuarios (solo admin, no en modo público) */}
+      {!esModoPublico &&
+        usuario &&
+        usuario.rol === 'admin' &&
+        mostrarPanelUsuarios && (
+          <PanelUsuarios token={token} onCerrarSesion={desloguear} />
+        )}
 
       {tituloIntermedio && (
         <div className="max-w-6xl mx-auto mb-8">
