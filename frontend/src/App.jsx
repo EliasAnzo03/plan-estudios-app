@@ -254,7 +254,8 @@ function App() {
       ? correlativas.paraRendir
       : []
 
-    // Respaldo: si no hay estructura nueva pero sí IDs antiguos, los traducimos.
+    // Respaldo: si no hay estructura nueva pero sí IDs antiguos, los traducimos
+    // y los mostramos dentro de "Para Cursar" para que esa sección siempre tenga contenido.
     if (
       paraCursar.length === 0 &&
       paraRendir.length === 0 &&
@@ -266,7 +267,7 @@ function App() {
           return m ? m.nombre : null
         })
         .filter(Boolean)
-      return { paraCursar: [], paraRendir: nombres }
+      return { paraCursar: nombres, paraRendir: [] }
     }
 
     return { paraCursar, paraRendir }
