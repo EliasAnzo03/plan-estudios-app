@@ -242,10 +242,10 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 p-8 text-slate-300">
+    <div className="min-h-screen bg-slate-950 p-4 sm:p-8 text-slate-300 overflow-x-hidden">
       {/* Barra de sesión y Header informativo */}
-      <div className="max-w-6xl mx-auto flex justify-end mb-4">
-        <div className="flex items-center gap-3">
+      <div className="max-w-6xl mx-auto flex justify-end mb-4 flex-wrap gap-2">
+        <div className="flex items-center gap-3 flex-wrap">
           {usuario && (
             <span className="text-slate-500 text-xs font-mono uppercase tracking-wider">
               {usuario.username} · {usuario.rol}
@@ -278,7 +278,7 @@ function App() {
 
       {/* Header informativo */}
       <div className="flex flex-col items-center mb-10 gap-2">
-        <h1 className="text-indigo-500 text-2xl font-bold tracking-[0.3em] drop-shadow-md uppercase">
+        <h1 className="text-indigo-500 text-lg sm:text-2xl font-bold tracking-[0.15em] sm:tracking-[0.3em] drop-shadow-md uppercase text-center break-words">
           Ingeniería Informática
         </h1>
         <p className="text-slate-500 text-sm tracking-widest uppercase">
@@ -415,15 +415,15 @@ function App() {
         {agruparMaterias().map((grupo) => (
           <div
             key={`${grupo.anio}-${grupo.cuatrimestre}`}
-            className="grid grid-cols-[120px_1fr] gap-6"
+            className="grid grid-cols-[55px_1fr] sm:grid-cols-[120px_1fr] gap-3 sm:gap-6 min-w-0 w-full"
           >
             {/* Eje de tiempo */}
-            <div className="text-slate-500 text-xs font-mono uppercase text-right border-r border-slate-800 pr-4 pt-1">
+            <div className="text-slate-500 text-[10px] sm:text-xs font-mono uppercase text-right border-r border-slate-800 pr-2 sm:pr-4 pt-1 break-words">
               {formatearEje(grupo)}
             </div>
 
             {/* Tarjetas de materias del grupo */}
-            <div className="flex flex-wrap gap-4">
+            <div className="flex flex-col sm:flex-row sm:flex-wrap gap-4 min-w-0">
               {grupo.materias.map((materia) => {
                 const estilo =
                   ESTILOS_ESTADO[materia.estado] || ESTILOS_ESTADO.pendiente
@@ -436,8 +436,8 @@ function App() {
                   })
 
                 const tarjetaClases = correlativasAprobadas
-                  ? `bg-slate-900 rounded-xl border ${estilo.borde} p-5 w-64 transition-transform duration-300 hover:scale-105 active:scale-95 cursor-pointer`
-                  : `bg-slate-950/50 rounded-xl border border-slate-800 text-slate-500 p-5 w-64 opacity-60`
+                  ? `bg-slate-900 rounded-xl border ${estilo.borde} p-5 w-full sm:w-64 transition-transform duration-300 hover:scale-105 active:scale-95 cursor-pointer`
+                  : `bg-slate-950/50 rounded-xl border border-slate-800 text-slate-500 p-5 w-full sm:w-64 opacity-60`
 
                 return (
                   <div
