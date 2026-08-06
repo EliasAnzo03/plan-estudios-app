@@ -322,6 +322,20 @@ function App() {
     }
   }
 
+  // Normaliza una fecha a "YYYY-MM-DD" manipulando SOLO el string (sin new Date()).
+  // Toma la parte YYYY-MM-DD ignorando desde la 'T' en adelante (si viene de la BD
+  // como timestamp) y devuelve 'YYYY-MM-DD'. Evita el desfase de zona horaria.
+  const aYYYYMMDD = (fecha) =>
+    String(fecha).split('T')[0].split(' ')[0]
+
+  // Formatea la fecha como DD/MM/YYYY manipulando únicamente el string.
+  // No usa new Date(), así que no hay bug de "día anterior" por UTC.
+  const formatearFecha = (fecha) => {
+    const [anio, mes, dia] = aYYYYMMDD(fecha).split('-')
+    if (!anio || !mes || !dia) return ''
+    return `${dia}/${mes}/${anio}`
+  }
+
   // ---------------------------------------------------------------
   // Cálculos para el Dashboard de Progreso y Promedio
   // ---------------------------------------------------------------
@@ -791,6 +805,11 @@ function App() {
                 // En modo público deshabilitamos el click para cambiar estados.
                 const editable = puedeCursar && !esModoPublico
 
+                // ¿La materia tiene fechas/parciales cargados en el estado global?
+                const tieneParciales = parciales.some(
+                  (p) => p.materia_id === materia.id
+                )
+
                 const tarjetaClases = editable
                   ? `bg-slate-900 rounded-xl border ${estilo.borde} p-5 w-full sm:w-64 transition-transform duration-300 hover:scale-105 active:scale-95 cursor-pointer`
                   : `bg-slate-900/80 rounded-xl border ${estilo.borde} p-5 w-full sm:w-64`
@@ -827,6 +846,13 @@ function App() {
                       <h3 className="font-semibold text-lg text-slate-100 break-words pr-1">
                         {materia.nombre}
                       </h3>
+
+                      {/* Indicador sutil: la materia tiene fechas/parciales cargados */}
+                      {tieneParciales && (
+                        <span className="text-[10px] font-medium uppercase tracking-wider text-blue-300/80 bg-blue-500/10 border border-blue-500/30 rounded-full px-2 py-0.5">
+                          🗓️ Fechas cargadas
+                        </span>
+                      )}
                     </div>
 
                     {/* Nota: solo se muestra si la materia está "Aprobada".
@@ -1002,9 +1028,14 @@ function App() {
       {parcialesModal &&
         (() => {
           // Parciales de la materia seleccionada, ordenados por fecha.
+          // Ordenamos por el string normalizado "YYYY-MM-DD" (no new Date()), así
+          // evitamos el bug del desfase de zona horaria.
           const parcialesDeMateria = parciales
             .filter((p) => p.materia_id === parcialesModal.id)
-            .sort((a, b) => new Date(a.fecha) - new Date(b.fecha))
+            .sort(
+              (a, b) =>
+                aYYYYMMDD(a.fecha).localeCompare(aYYYYMMDD(b.fecha))
+            )
 
           return (
             <div
@@ -1050,12 +1081,7 @@ function App() {
                             {parcial.titulo}
                           </p>
                           <p className="text-xs text-slate-500 font-mono">
-                            {new Date(parcial.fecha).toLocaleDateString('es-AR', {
-                              weekday: 'long',
-                              day: 'numeric',
-                              month: 'long',
-                              year: 'numeric',
-                            })}
+                            {formatearFecha(parcial.fecha)}
                           </p>
                         </div>
                         <button
