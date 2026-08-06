@@ -38,6 +38,10 @@ function App() {
   const [cargandoPendientes, setCargandoPendientes] = useState(false)
   const [errorAdmin, setErrorAdmin] = useState('')
   const [materiaInfo, setMateriaInfo] = useState(null) // materia abierta en el modal de correlativas
+  const [parciales, setParciales] = useState([]) // todos los parciales del usuario
+  const [parcialesModal, setParcialesModal] = useState(null) // { id, nombre } de la materia del modal de parciales
+  const [nuevoParcialTitulo, setNuevoParcialTitulo] = useState('')
+  const [nuevoParcialFecha, setNuevoParcialFecha] = useState('')
   const [token, setToken] = useState(() => localStorage.getItem('token'))
   const [usuario, setUsuario] = useState(() => {
     try {
@@ -264,6 +268,61 @@ function App() {
   }
 
   // ---------------------------------------------------------------
+  // Gestión de Parciales (Fechas/Parciales por materia)
+  // ---------------------------------------------------------------
+
+  // Headers con token de autenticación (igual que en materias).
+  const headersAutenticados = {
+    'Content-Type': 'application/json',
+    Authorization: 'Bearer ' + token,
+  }
+
+  // Elimina un parcial del usuario (DELETE /api/parciales/:id)
+  const eliminarParcial = async (id) => {
+    try {
+      const respuesta = await verificarNoAutorizado(
+        await fetch(`${API_URL}/api/parciales/${id}`, {
+          method: 'DELETE',
+          headers: headersAutenticados,
+        })
+      )
+      if (!respuesta.ok) return
+      // Actualizamos el estado local de parciales.
+      setParciales((prev) => prev.filter((p) => p.id !== id))
+    } catch (error) {
+      console.error('Error de red al eliminar parcial:', error)
+    }
+  }
+
+  // Agrega un parcial para la materia seleccionada (POST /api/parciales)
+  const agregarParcial = async (e) => {
+    e.preventDefault()
+    if (!nuevoParcialTitulo.trim() || !nuevoParcialFecha) return
+    try {
+      const respuesta = await verificarNoAutorizado(
+        await fetch(`${API_URL}/api/parciales`, {
+          method: 'POST',
+          headers: headersAutenticados,
+          body: JSON.stringify({
+            materia_id: parcialesModal.id,
+            titulo: nuevoParcialTitulo.trim(),
+            fecha: nuevoParcialFecha,
+          }),
+        })
+      )
+      if (!respuesta.ok) return
+      const nuevoParcial = await respuesta.json()
+      // Actualizamos el estado local con el parcial creado.
+      setParciales((prev) => [...prev, nuevoParcial])
+      // Limpiamos el formulario.
+      setNuevoParcialTitulo('')
+      setNuevoParcialFecha('')
+    } catch (error) {
+      console.error('Error de red al agregar parcial:', error)
+    }
+  }
+
+  // ---------------------------------------------------------------
   // Cálculos para el Dashboard de Progreso y Promedio
   // ---------------------------------------------------------------
   const totalMaterias = materias.length
@@ -418,6 +477,18 @@ function App() {
         if (!respTitulo.ok) return
         const titulo = await respTitulo.json()
         setTituloIntermedio(titulo.obtenido)
+
+        // Cargar los parciales del usuario (solo en modo con sesión; en modo
+        // público no se muestran fechas, ya que son datos editables privados).
+        if (!esModoPublico) {
+          const respParciales = await verificarNoAutorizado(
+            await fetch(`${API_URL}/api/parciales`, { headers })
+          )
+          if (respParciales.ok) {
+            const datosParciales = await respParciales.json()
+            setParciales(datosParciales)
+          }
+        }
       } catch (error) {
         console.error('Error al cargar datos:', error)
       }
@@ -793,6 +864,21 @@ function App() {
                       )
                     )}
 
+                    {materia.estado === 'en_curso' && !esModoPublico && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setParcialesModal({
+                            id: materia.id,
+                            nombre: materia.nombre,
+                          })
+                        }}
+                        className="mt-3 w-full text-xs font-semibold uppercase tracking-wider text-blue-300 hover:text-blue-200 border border-blue-500/40 hover:border-blue-400 hover:bg-blue-500/10 rounded-lg px-3 py-2 transition-all duration-300"
+                      >
+                        📅 Fechas/Parciales
+                      </button>
+                    )}
+
                     {!puedeCursar && (
                       <p className="mt-3 text-xs text-slate-500 flex items-center gap-1">
                         🔒 Regularizá las correlativas para cursar
@@ -911,6 +997,109 @@ function App() {
           </div>
         </div>
       )}
+
+      {/* Modal de fechas/parciales de una materia "En Curso" */}
+      {parcialesModal &&
+        (() => {
+          // Parciales de la materia seleccionada, ordenados por fecha.
+          const parcialesDeMateria = parciales
+            .filter((p) => p.materia_id === parcialesModal.id)
+            .sort((a, b) => new Date(a.fecha) - new Date(b.fecha))
+
+          return (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+              onClick={() => setParcialesModal(null)}
+            >
+              <div
+                className="w-full max-w-md bg-slate-900 rounded-2xl border border-slate-700 shadow-[0_0_40px_rgba(59,130,246,0.25)] p-6 sm:p-8 max-h-[85vh] overflow-y-auto"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-start justify-between gap-4 mb-4">
+                  <div>
+                    <h2 className="text-xl font-bold text-slate-100 break-words">
+                      📅 Fechas/Parciales
+                    </h2>
+                    <p className="text-xs text-slate-500 uppercase tracking-widest mt-1 break-words">
+                      {parcialesModal.nombre}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setParcialesModal(null)}
+                    className="w-8 h-8 flex items-center justify-center rounded-full text-slate-400 hover:text-red-400 hover:bg-red-500/10 border border-slate-700 transition-all duration-300 cursor-pointer shrink-0"
+                    aria-label="Cerrar"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* Lista de parciales de la materia */}
+                {parcialesDeMateria.length === 0 ? (
+                  <p className="text-center text-slate-500 text-sm py-6">
+                    Todavía no cargaste fechas para esta materia.
+                  </p>
+                ) : (
+                  <ul className="space-y-2 mb-6">
+                    {parcialesDeMateria.map((parcial) => (
+                      <li
+                        key={parcial.id}
+                        className="flex items-center gap-2 text-sm text-slate-300 bg-slate-800/50 border border-slate-800 rounded-lg px-3 py-2"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold break-words">
+                            {parcial.titulo}
+                          </p>
+                          <p className="text-xs text-slate-500 font-mono">
+                            {new Date(parcial.fecha).toLocaleDateString('es-AR', {
+                              weekday: 'long',
+                              day: 'numeric',
+                              month: 'long',
+                              year: 'numeric',
+                            })}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => eliminarParcial(parcial.id)}
+                          className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg border border-red-500/40 text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-all duration-300 cursor-pointer"
+                          aria-label={`Eliminar ${parcial.titulo}`}
+                          title="Eliminar"
+                        >
+                          🗑️
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {/* Formulario para agregar un parcial */}
+                <form
+                  onSubmit={agregarParcial}
+                  className="mt-2 flex flex-col gap-3"
+                >
+                  <input
+                    type="text"
+                    placeholder="Ej: 1er Parcial, Recuperatorio"
+                    value={nuevoParcialTitulo}
+                    onChange={(e) => setNuevoParcialTitulo(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 text-sm placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
+                  />
+                  <input
+                    type="date"
+                    value={nuevoParcialFecha}
+                    onChange={(e) => setNuevoParcialFecha(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
+                  />
+                  <button
+                    type="submit"
+                    className="w-full text-sm font-semibold uppercase tracking-wider text-blue-300 hover:text-blue-200 border border-blue-500/50 hover:bg-blue-500/10 rounded-lg px-3 py-2 transition-all duration-300"
+                  >
+                    Agregar
+                  </button>
+                </form>
+              </div>
+            </div>
+          )
+        })()}
     </div>
   )
 }

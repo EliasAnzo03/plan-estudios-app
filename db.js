@@ -59,6 +59,16 @@ async function initSchema() {
       FOREIGN KEY (requiere_id) REFERENCES materias(id) ON DELETE CASCADE,
       PRIMARY KEY (materia_id, requiere_id, tipo_requisito)
     );
+
+    -- Parciales
+    CREATE TABLE IF NOT EXISTS parciales (
+      id SERIAL PRIMARY KEY,
+      usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+      materia_id INTEGER NOT NULL REFERENCES materias(id) ON DELETE CASCADE,
+      titulo TEXT NOT NULL,
+      fecha DATE NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 
   // Asegurar la columna `nota` en tablas existentes (migración segura)

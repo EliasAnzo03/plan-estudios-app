@@ -778,6 +778,91 @@ app.delete('/api/materias/:id', verificarToken, requiereRol('admin'), async (req
   }
 });
 
+// ---------------------------------------------------------------------------
+// GET /api/parciales
+// Devuelve todos los parciales del usuario autenticado, ordenados por fecha.
+// ---------------------------------------------------------------------------
+app.get('/api/parciales', verificarToken, async (req, res) => {
+  const usuario_id = req.usuarioId;
+
+  try {
+    const resultado = await pool.query(
+      `SELECT * FROM parciales
+       WHERE usuario_id = $1
+       ORDER BY fecha ASC`,
+      [usuario_id]
+    );
+
+    res.json(resultado.rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/parciales
+// Crea un parcial para el usuario autenticado vinculado a una materia.
+// Recibe materia_id, titulo y fecha desde req.body.
+// ---------------------------------------------------------------------------
+app.post('/api/parciales', verificarToken, async (req, res) => {
+  const { materia_id, titulo, fecha } = req.body;
+  const usuario_id = req.usuarioId;
+
+  if (!materia_id || !titulo || !fecha) {
+    return res.status(400).json({
+      error: 'materia_id, titulo y fecha son obligatorios'
+    });
+  }
+
+  try {
+    // Verificamos que la materia exista en la grilla global
+    const materiaResult = await pool.query(
+      'SELECT id FROM materias WHERE id = $1',
+      [materia_id]
+    );
+    if (materiaResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Materia no encontrada' });
+    }
+
+    const resultado = await pool.query(`
+      INSERT INTO parciales (usuario_id, materia_id, titulo, fecha)
+      VALUES ($1, $2, $3, $4)
+      RETURNING *
+    `, [usuario_id, Number(materia_id), titulo, fecha]);
+
+    res.status(201).json(resultado.rows[0]);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// DELETE /api/parciales/:id
+// Elimina un parcial del usuario autenticado. El WHERE incluye usuario_id
+// para que cada usuario solo pueda eliminar sus propios parciales.
+// ---------------------------------------------------------------------------
+app.delete('/api/parciales/:id', verificarToken, async (req, res) => {
+  const { id } = req.params;
+  const usuario_id = req.usuarioId;
+
+  try {
+    const resultado = await pool.query(
+      'DELETE FROM parciales WHERE id = $1 AND usuario_id = $2',
+      [Number(id), usuario_id]
+    );
+
+    if (resultado.rowCount === 0) {
+      return res.status(404).json({
+        error: 'Parcial no encontrado o no pertenece al usuario'
+      });
+    }
+
+    res.json({ message: 'Parcial eliminado correctamente', id: Number(id) });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Inicializar el esquema y luego iniciar el servidor
 app.listen(port, () => {
   console.log(`Servidor corriendo en http://localhost:${port}`);
