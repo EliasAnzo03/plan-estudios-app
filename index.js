@@ -345,13 +345,52 @@ app.put('/api/admin/users/:id/approve', verificarToken, requiereRol('admin'), as
 });
 // ---------------------------------------------------------------------------
 // GET /api/materias
-// Devuelve la grilla global de materias con el estado INDIVIDUAL del usuario
-// autenticado (LEFT JOIN con usuario_materia, filtrado por req.usuarioId).
+// Devuelve la grilla global de materias con el estado INDIVIDUAL del usuario.
+//
+// Dos modos de uso:
+//  - Autenticado (header Bearer): usa el usuario del token (req.usuarioId).
+//  - Público / Solo lectura (?view=public&user=<id>): permite solicitudes sin
+//    token y resuelve el usuario a partir del query param `user`. Esto habilita
+//    el "Compartir mi progreso" con un link público. Los endpoints de
+//    MODIFICACIÓN (PUT/PATCH/POST/DELETE) siguen estrictamente protegidos por
+//    verificarToken / requiereRol.
 // ---------------------------------------------------------------------------
-app.get('/api/materias', verificarToken, async (req, res) => {
-  try {
-    const usuario_id = req.usuarioId;
+app.get('/api/materias', async (req, res) => {
+  let usuario_id = null;
 
+  // 1) Intentar autenticar con el token (si viene presente y es válido).
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.split(' ')[1];
+    try {
+      const payload = jwt.verify(token, JWT_SECRET);
+      usuario_id = payload.id;
+    } catch (error) {
+      // Token inválido: no autorizamos; si no hay público válido, será 401.
+    }
+  }
+
+  // 2) Si no hay token válido, intentamos el modo público con el query param
+  //    `user`. Requiere que `view=public` esté presente para ser explícito.
+  if (usuario_id === null) {
+    if (req.query.view === 'public' && req.query.user) {
+      const idPublico = Number(req.query.user);
+      if (!Number.isNaN(idPublico)) {
+        // Verificamos que el usuario exista (no exponer datos de ids inexistentes)
+        const existe = await pool.query('SELECT id FROM usuarios WHERE id = $1', [idPublico]);
+        if (existe.rows.length > 0) {
+          usuario_id = idPublico;
+        }
+      }
+    }
+
+    // Sin token válido y sin usuario público válido => no autorizado.
+    if (usuario_id === null) {
+      return res.status(401).json({ error: 'Token no proporcionado o usuario público inválido' });
+    }
+  }
+
+  try {
     // LEFT JOIN: si el usuario no tiene registro en usuario_materia,
     // COALESCE devuelve 'pendiente' como estado por defecto.
     const sqlMaterias = `
@@ -538,9 +577,39 @@ app.get('/api/materias/:id/correlativas', verificarToken, async (req, res) => {
 // ---------------------------------------------------------------------------
 // GET /api/estadisticas/titulo-intermedio
 // Verifica si todas las materias de 1°, 2° y 3° del USUARIO están aprobadas.
+// Igual que GET /api/materias, admite modo público (?view=public&user=<id>).
 // ---------------------------------------------------------------------------
-app.get('/api/estadisticas/titulo-intermedio', verificarToken, async (req, res) => {
-  const usuario_id = req.usuarioId;
+app.get('/api/estadisticas/titulo-intermedio', async (req, res) => {
+  let usuario_id = null;
+
+  // 1) Intentar autenticar con el token (si viene presente y es válido).
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.split(' ')[1];
+    try {
+      const payload = jwt.verify(token, JWT_SECRET);
+      usuario_id = payload.id;
+    } catch (error) {
+      // Token inválido: ver el modo público a continuación.
+    }
+  }
+
+  // 2) Modo público (?view=public&user=<id>): sin token.
+  if (usuario_id === null) {
+    if (req.query.view === 'public' && req.query.user) {
+      const idPublico = Number(req.query.user);
+      if (!Number.isNaN(idPublico)) {
+        const existe = await pool.query('SELECT id FROM usuarios WHERE id = $1', [idPublico]);
+        if (existe.rows.length > 0) {
+          usuario_id = idPublico;
+        }
+      }
+    }
+
+    if (usuario_id === null) {
+      return res.status(401).json({ error: 'Token no proporcionado o usuario público inválido' });
+    }
+  }
 
   try {
     const resultado = await pool.query(`

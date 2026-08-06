@@ -47,6 +47,43 @@ function App() {
     }
   })
 
+  // ---------------------------------------------------------------------
+  // Modo Solo Lectura (Shareable Link)
+  // Detectamos la vista pública a partir de la URL: ?view=public&user=<id>.
+  // En este modo no hay sesión: se deshabilitan los cambios de estado, se
+  // oculta el input de notas (se muestra como texto estático) y el dashboard
+  // y el modal de correlativas siguen funcionando de forma normal.
+  // ---------------------------------------------------------------------
+  const parametrosUrl = new URLSearchParams(window.location.search)
+  const esModoPublico = parametrosUrl.get('view') === 'public'
+  const publicUserId = esModoPublico ? parametrosUrl.get('user') : null
+  const [linkCopiado, setLinkCopiado] = useState(false)
+
+  // Construye la URL del link público para compartir.
+  const urlCompartir = () => {
+    const base = `${window.location.origin}${window.location.pathname}`
+    return `${base}?view=public&user=${usuario?.id ?? publicUserId}`
+  }
+
+  // Copia el link público al portapapeles y muestra el aviso "¡Link copiado!".
+  const copiarLinkPublico = async () => {
+    try {
+      await navigator.clipboard.writeText(urlCompartir())
+      setLinkCopiado(true)
+      setTimeout(() => setLinkCopiado(false), 2000)
+    } catch {
+      // Si el portapapeles no está disponible, copiamos de forma manual.
+      const textarea = document.createElement('textarea')
+      textarea.value = urlCompartir()
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textarea)
+      setLinkCopiado(true)
+      setTimeout(() => setLinkCopiado(false), 2000)
+    }
+  }
+
   // Orden del ciclo de estados: pendiente -> en_curso -> regular -> aprobada -> pendiente
   const ORDEN_CICLO = ['pendiente', 'en_curso', 'regular', 'aprobada']
 
@@ -313,24 +350,29 @@ function App() {
   }
 
   useEffect(() => {
-    if (!token) return
+    // En modo público no hay token; la grilla se resuelve desde publicUserId.
+    if (!token && !esModoPublico) return
 
     const cargarDatos = async () => {
       try {
+        // Construimos el query para el modo público (?view=public&user=<id>)
+        const queryPublica = esModoPublico
+          ? `?view=public&user=${publicUserId}`
+          : ''
+        const headers = esModoPublico ? {} : { Authorization: 'Bearer ' + token }
+
         // Cargar materias
         const respMaterias = await verificarNoAutorizado(
-          await fetch(`${API_URL}/api/materias`, {
-            headers: { Authorization: 'Bearer ' + token },
-          })
+          await fetch(`${API_URL}/api/materias${queryPublica}`, { headers })
         )
         if (!respMaterias.ok) return
         const datos = await respMaterias.json()
         setMaterias(datos)
 
-        // Chequear si se obtuvo el título intermedio
+        // Chequear si se obtuvo el título intermedio (también público)
         const respTitulo = await verificarNoAutorizado(
-          await fetch(`${API_URL}/api/estadisticas/titulo-intermedio`, {
-            headers: { Authorization: 'Bearer ' + token },
+          await fetch(`${API_URL}/api/estadisticas/titulo-intermedio${queryPublica}`, {
+            headers,
           })
         )
         if (!respTitulo.ok) return
@@ -342,10 +384,10 @@ function App() {
     }
 
     cargarDatos()
-  }, [token])
+  }, [token, esModoPublico, publicUserId])
 
-  // Si NO hay token, mostramos la pantalla de Login
-  if (!token) {
+  // Si NO hay token y NO estamos en modo público, mostramos la pantalla de Login.
+  if (!token && !esModoPublico) {
     return <Login onLogin={manejarLogin} />
   }
 
@@ -375,14 +417,25 @@ function App() {
               {mostrarPanelAdmin ? 'Cerrar Panel' : 'Panel Admin'}
             </button>
           )}
-          <button
-            onClick={desloguear}
-            className="text-xs text-slate-500 hover:text-red-400 border border-slate-800 hover:border-red-500/50 rounded-lg px-3 py-1.5 font-semibold uppercase tracking-wider transition-all duration-300 hover:shadow-[0_0_15px_rgba(239,68,68,0.2)]"
-          >
-            Cerrar Sesión
-          </button>
+          {!esModoPublico && (
+            <button
+              onClick={desloguear}
+              className="text-xs text-slate-500 hover:text-red-400 border border-slate-800 hover:border-red-500/50 rounded-lg px-3 py-1.5 font-semibold uppercase tracking-wider transition-all duration-300 hover:shadow-[0_0_15px_rgba(239,68,68,0.2)]"
+            >
+              Cerrar Sesión
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Banner de modo público / solo lectura */}
+      {esModoPublico && (
+        <div className="max-w-6xl mx-auto mb-4">
+          <div className="flex items-center justify-center gap-2 text-xs font-semibold uppercase tracking-widest text-slate-400 bg-slate-900/70 border border-slate-800 rounded-lg px-4 py-2">
+            <span className="text-slate-500">👁</span> Vista pública (solo lectura) · Ábrelo con tu cuenta para editar
+          </div>
+        </div>
+      )}
 
       {/* Header informativo */}
       <div className="flex flex-col items-center mb-10 gap-2">
@@ -392,9 +445,11 @@ function App() {
         <p className="text-slate-500 text-sm tracking-widest uppercase">
           Malla Curricular - Correlativas
         </p>
-        <p className="text-slate-600 text-xs font-mono mt-2 text-center">
-          Click 1x -&gt; En Curso · Click 2x -&gt; Regular · Click 3x -&gt; Aprobada · Click 4x -&gt; Reiniciar
-        </p>
+        {!esModoPublico && (
+          <p className="text-slate-600 text-xs font-mono mt-2 text-center">
+            Click 1x -&gt; En Curso · Click 2x -&gt; Regular · Click 3x -&gt; Aprobada · Click 4x -&gt; Reiniciar
+          </p>
+        )}
 
         {/* Leyenda de colores */}
         <div className="flex flex-wrap justify-center gap-6 mt-4">
@@ -518,6 +573,28 @@ function App() {
         </div>
       )}
 
+      {/* Botón de Compartir progreso (solo en modo con sesión) */}
+      {!esModoPublico && (
+        <div className="max-w-6xl mx-auto mb-4 flex justify-end">
+          <button
+            onClick={copiarLinkPublico}
+            className="group flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-indigo-300 hover:text-indigo-200 border border-indigo-500/40 hover:border-indigo-400 hover:bg-indigo-500/10 rounded-lg px-4 py-2 transition-all duration-300 shadow-[0_0_15px_rgba(99,102,241,0.15)]"
+          >
+            <span className="text-base leading-none">🔗</span>
+            Compartir mi progreso
+          </button>
+        </div>
+      )}
+
+      {/* Aviso de link copiado */}
+      {linkCopiado && (
+        <div className="max-w-6xl mx-auto mb-4 flex justify-end">
+          <span className="text-xs font-semibold text-green-400 bg-green-500/10 border border-green-500/40 rounded-lg px-3 py-1.5">
+            ✓ ¡Link copiado!
+          </span>
+        </div>
+      )}
+
       {/* Dashboard de Progreso y Promedio */}
       <div className="max-w-6xl mx-auto mb-8">
         <div className="bg-slate-900 rounded-2xl border border-slate-800 shadow-[0_0_25px_rgba(99,102,241,0.1)] p-6 sm:p-8">
@@ -584,15 +661,18 @@ function App() {
                 // Regla 2: puede rendir (Aprobada) solo si paraRendir está estrictamente aprobada.
                 const puedeRendir = cumpleCorrelativas(materia, 'paraRendir')
 
-                const tarjetaClases = puedeCursar
+                // En modo público deshabilitamos el click para cambiar estados.
+                const editable = puedeCursar && !esModoPublico
+
+                const tarjetaClases = editable
                   ? `bg-slate-900 rounded-xl border ${estilo.borde} p-5 w-full sm:w-64 transition-transform duration-300 hover:scale-105 active:scale-95 cursor-pointer`
-                  : `bg-slate-950/50 rounded-xl border border-slate-800 text-slate-500 p-5 w-full sm:w-64 opacity-60`
+                  : `bg-slate-900/80 rounded-xl border ${estilo.borde} p-5 w-full sm:w-64`
 
                 return (
                   <div
                     key={materia.id}
                     onClick={
-                      puedeCursar
+                      editable
                         ? () => ciclarEstadoMateria(materia, puedeRendir)
                         : undefined
                     }
@@ -622,26 +702,39 @@ function App() {
                       </h3>
                     </div>
 
-                    {/* Input de nota: solo se muestra si la materia está "Aprobada" */}
+                    {/* Nota: solo se muestra si la materia está "Aprobada".
+                        - Con sesión: input numérico editable.
+                        - Modo público: texto estático, solo lectura. */}
                     {materia.estado === 'aprobada' && (
-                      <div
-                        className="w-full flex items-center gap-2"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <label className="text-[10px] uppercase tracking-wider text-green-400/80 font-semibold shrink-0">
-                          Nota
-                        </label>
-                        <input
-                          type="number"
-                          min="1"
-                          max="10"
-                          step="0.5"
-                          placeholder="1-10"
-                          value={materia.nota ?? ''}
-                          onChange={(e) => guardarNota(materia.id, e.target.value)}
-                          className="w-20 px-2 py-1 rounded-lg bg-slate-800 border border-green-500/40 text-green-300 text-sm font-mono text-center focus:outline-none focus:ring-2 focus:ring-green-500/50 focus:border-green-500 placeholder:text-slate-600"
-                        />
-                      </div>
+                      esModoPublico ? (
+                        <div className="w-full flex items-center gap-2">
+                          <label className="text-[10px] uppercase tracking-wider text-green-400/80 font-semibold shrink-0">
+                            Nota
+                          </label>
+                          <span className="px-2 py-1 rounded-lg bg-slate-800 border border-green-500/40 text-green-300 text-sm font-mono text-center min-w-20">
+                            {materia.nota ?? '—'}
+                          </span>
+                        </div>
+                      ) : (
+                        <div
+                          className="w-full flex items-center gap-2"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <label className="text-[10px] uppercase tracking-wider text-green-400/80 font-semibold shrink-0">
+                            Nota
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            max="10"
+                            step="0.5"
+                            placeholder="1-10"
+                            value={materia.nota ?? ''}
+                            onChange={(e) => guardarNota(materia.id, e.target.value)}
+                            className="w-20 px-2 py-1 rounded-lg bg-slate-800 border border-green-500/40 text-green-300 text-sm font-mono text-center focus:outline-none focus:ring-2 focus:ring-green-500/50 focus:border-green-500 placeholder:text-slate-600"
+                          />
+                        </div>
+                      )
                     )}
 
                     {!puedeCursar && (
