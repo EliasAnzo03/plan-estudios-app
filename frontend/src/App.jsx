@@ -243,36 +243,6 @@ function App() {
     })
   }
 
-  // Devuelve { paraCursar, paraRendir } para mostrar en el modal.
-  // Prioriza la estructura nueva; si no hay, traduce correlativas_ids a nombres.
-  const obtenerCorrelativas = (materia) => {
-    const correlativas = materia.correlativas || {}
-    const paraCursar = Array.isArray(correlativas.paraCursar)
-      ? correlativas.paraCursar
-      : []
-    const paraRendir = Array.isArray(correlativas.paraRendir)
-      ? correlativas.paraRendir
-      : []
-
-    // Respaldo: si no hay estructura nueva pero sí IDs antiguos, los traducimos
-    // y los mostramos dentro de "Para Cursar" para que esa sección siempre tenga contenido.
-    if (
-      paraCursar.length === 0 &&
-      paraRendir.length === 0 &&
-      (materia.correlativas_ids || []).length > 0
-    ) {
-      const nombres = materia.correlativas_ids
-        .map((id) => {
-          const m = materias.find((x) => x.id === id)
-          return m ? m.nombre : null
-        })
-        .filter(Boolean)
-      return { paraCursar: nombres, paraRendir: [] }
-    }
-
-    return { paraCursar, paraRendir }
-  }
-
   useEffect(() => {
     if (!token) return
 
@@ -584,63 +554,55 @@ function App() {
               Correlativas requeridas
             </p>
 
-            {(() => {
-              const { paraCursar, paraRendir } = obtenerCorrelativas(materiaInfo)
-              const hayCorrelativas = paraCursar.length > 0 || paraRendir.length > 0
+            {/* Sección: Para Cursar (se renderiza independientemente si hay datos) */}
+            {materiaInfo.correlativas?.paraCursar?.length > 0 && (
+              <div className="mb-5">
+                <h3 className="text-xs font-bold uppercase tracking-widest text-blue-400 mb-2 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-blue-500 inline-block"></span>
+                  Para Cursar
+                </h3>
+                <ul className="space-y-2">
+                  {materiaInfo.correlativas.paraCursar.map((nombre, i) => (
+                    <li
+                      key={i}
+                      className="flex items-center gap-2 text-sm text-slate-300 bg-slate-800/50 border border-slate-800 rounded-lg px-3 py-2"
+                    >
+                      <span className="text-blue-400 shrink-0">▸</span>
+                      <span className="break-words">{nombre}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
-              return (
-                <>
-                  {/* Sección: Para Cursar */}
-                  {paraCursar.length > 0 && (
-                    <div className="mb-5">
-                      <h3 className="text-xs font-bold uppercase tracking-widest text-blue-400 mb-2 flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-blue-500 inline-block"></span>
-                        Para Cursar
-                      </h3>
-                      <ul className="space-y-2">
-                        {paraCursar.map((nombre, i) => (
-                          <li
-                            key={i}
-                            className="flex items-center gap-2 text-sm text-slate-300 bg-slate-800/50 border border-slate-800 rounded-lg px-3 py-2"
-                          >
-                            <span className="text-blue-400 shrink-0">▸</span>
-                            <span className="break-words">{nombre}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
+            {/* Sección: Para Rendir (se renderiza independientemente si hay datos) */}
+            {materiaInfo.correlativas?.paraRendir?.length > 0 && (
+              <div>
+                <h3 className="text-xs font-bold uppercase tracking-widest text-green-400 mb-2 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-green-500 inline-block"></span>
+                  Para Rendir
+                </h3>
+                <ul className="space-y-2">
+                  {materiaInfo.correlativas.paraRendir.map((nombre, i) => (
+                    <li
+                      key={i}
+                      className="flex items-center gap-2 text-sm text-slate-300 bg-slate-800/50 border border-slate-800 rounded-lg px-3 py-2"
+                    >
+                      <span className="text-green-400 shrink-0">▸</span>
+                      <span className="break-words">{nombre}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
-                  {/* Sección: Para Rendir */}
-                  {paraRendir.length > 0 && (
-                    <div>
-                      <h3 className="text-xs font-bold uppercase tracking-widest text-green-400 mb-2 flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-green-500 inline-block"></span>
-                        Para Rendir
-                      </h3>
-                      <ul className="space-y-2">
-                        {paraRendir.map((nombre, i) => (
-                          <li
-                            key={i}
-                            className="flex items-center gap-2 text-sm text-slate-300 bg-slate-800/50 border border-slate-800 rounded-lg px-3 py-2"
-                          >
-                            <span className="text-green-400 shrink-0">▸</span>
-                            <span className="break-words">{nombre}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
-                  {/* Solo muestra "no requiere correlativas" cuando ambas listas están vacías */}
-                  {!hayCorrelativas && (
-                    <p className="text-center text-slate-500 text-sm py-4">
-                      Esta materia no requiere correlativas.
-                    </p>
-                  )}
-                </>
-              )
-            })()}
+            {/* Solo muestra "no requiere correlativas" cuando ambas listas están vacías */}
+            {(!materiaInfo.correlativas?.paraCursar?.length &&
+              !materiaInfo.correlativas?.paraRendir?.length) && (
+              <p className="text-center text-slate-500 text-sm py-4">
+                Esta materia no requiere correlativas.
+              </p>
+            )}
           </div>
         </div>
       )}
