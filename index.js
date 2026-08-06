@@ -363,9 +363,11 @@ app.get('/api/materias', verificarToken, async (req, res) => {
       ORDER BY m.anio ASC, m.cuatrimestre ASC
     `;
     const sqlCorrelativas = `
-      SELECT materia_id, requiere_id
-      FROM correlativas
-      ORDER BY materia_id
+      SELECT c.materia_id, c.requiere_id, c.tipo_requisito, c.condicion_requerida,
+             req.id AS req_id, req.nombre AS req_nombre
+      FROM correlativas c
+      JOIN materias req ON req.id = c.requiere_id
+      ORDER BY c.materia_id ASC
     `;
 
     const materiasResult = await pool.query(sqlMaterias, [usuario_id]);
@@ -373,24 +375,44 @@ app.get('/api/materias', verificarToken, async (req, res) => {
     const materias = materiasResult.rows;
     const correlativas = correlativasResult.rows;
 
-    // Agrupamos los IDs de requisitos por materia de una sola pasada
+    // Agrupamos por materia discriminando 'para_cursar' / 'para_rendir'
+    // y la condición (regular / aprobada) de cada requisito.
     const requisitosPorMateria = new Map();
     for (const c of correlativas) {
       if (!requisitosPorMateria.has(c.materia_id)) {
-        requisitosPorMateria.set(c.materia_id, []);
+        requisitosPorMateria.set(c.materia_id, {
+          paraCursar: [],
+          paraRendir: [],
+          ids: new Set()
+        });
       }
-      requisitosPorMateria.get(c.materia_id).push(c.requiere_id);
+      const grupo = requisitosPorMateria.get(c.materia_id);
+      const requerimiento = {
+        id: c.req_id,
+        nombre: c.req_nombre,
+        condicion: c.condicion_requerida
+      };
+      if (c.tipo_requisito === 'para_rendir') {
+        grupo.paraRendir.push(requerimiento);
+      } else {
+        grupo.paraCursar.push(requerimiento);
+      }
+      grupo.ids.add(c.requiere_id);
     }
 
-    // Asignamos correlativas_ids a cada materia (sin duplicados)
+    // Respuesta con el esquema nuevo (correlativas) y mantenemos
+    // correlativas_ids (sin duplicados) para compatibilidad.
     const resultado = materias.map(materia => {
-      const ids = requisitosPorMateria.get(materia.id) || [];
+      const req = requisitosPorMateria.get(materia.id) || { paraCursar: [], paraRendir: [], ids: new Set() };
       return {
         ...materia,
-        correlativas_ids: [...new Set(ids)]
+        correlativas: {
+          paraCursar: req.paraCursar,
+          paraRendir: req.paraRendir
+        },
+        correlativas_ids: [...req.ids]
       };
     });
-
     res.json(resultado);
   } catch (error) {
     res.status(500).json({ error: error.message });

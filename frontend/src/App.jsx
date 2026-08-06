@@ -214,32 +214,21 @@ function App() {
   }
 
   // Determina si se cumplen las correlativas de una materia para el nivel dado.
-  // tipo = 'paraCursar' -> se exige "regular" o "aprobada" en cada requisito.
-  // tipo = 'paraRendir' -> se exige estrictamente "aprobada" en cada requisito.
+  // Cada requisito de materia.correlativas[tipo] es { id, nombre, condicion }.
+  // - 'paraCursar': se respeta la condición individual de cada requisito
+  //   (regular o aprobada) cargada en el backend.
+  // - 'paraRendir': se exige estrictamente "aprobada" en cada requisito.
   const cumpleCorrelativas = (materia, tipo) => {
-    const estadoMinimo = tipo === 'paraRendir' ? 'aprobada' : 'regular'
-
-    // Esquema nuevo: correlativas { paraCursar: [...], paraRendir: [...] } por nombre.
-    const listaNombres = materia.correlativas && materia.correlativas[tipo]
-    if (listaNombres && listaNombres.length > 0) {
-      return listaNombres.every((nombre) => {
-        const req = materias.find((m) => m.nombre === nombre)
-        if (!req) return false
-        return estadoMinimo === 'aprobada'
-          ? req.estado === 'aprobada'
-          : req.estado === 'regular' || req.estado === 'aprobada'
-      })
-    }
-
-    // Fallback: esquema antiguo con correlativas_ids (array de IDs).
-    const ids = materia.correlativas_ids || []
-    if (ids.length === 0) return true
-    return ids.every((id) => {
-      const req = materias.find((m) => m.id === id)
-      if (!req) return false
-      return estadoMinimo === 'aprobada'
-        ? req.estado === 'aprobada'
-        : req.estado === 'regular' || req.estado === 'aprobada'
+    const requisitos = (materia.correlativas && materia.correlativas[tipo]) || []
+    if (requisitos.length === 0) return true
+    return requisitos.every((req) => {
+      const requisito = materias.find((m) => m.id === req.id)
+      if (!requisito) return false
+      // paraRendir siempre exige "aprobada"; paraCursar usa la condición individual.
+      if (tipo === 'paraRendir' || req.condicion === 'aprobada') {
+        return requisito.estado === 'aprobada'
+      }
+      return requisito.estado === 'regular' || requisito.estado === 'aprobada'
     })
   }
 
@@ -562,13 +551,18 @@ function App() {
                   Para Cursar
                 </h3>
                 <ul className="space-y-2">
-                  {materiaInfo.correlativas.paraCursar.map((nombre, i) => (
+                  {materiaInfo.correlativas.paraCursar.map((req) => (
                     <li
-                      key={i}
+                      key={req.id}
                       className="flex items-center gap-2 text-sm text-slate-300 bg-slate-800/50 border border-slate-800 rounded-lg px-3 py-2"
                     >
                       <span className="text-blue-400 shrink-0">▸</span>
-                      <span className="break-words">{nombre}</span>
+                      <span className="break-words">{req.nombre}</span>
+                      {req.condicion === 'aprobada' && (
+                        <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wider text-blue-400/80 border border-blue-500/30 rounded-full px-2 py-0.5">
+                          aprobada
+                        </span>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -583,22 +577,26 @@ function App() {
                   Para Rendir
                 </h3>
                 <ul className="space-y-2">
-                  {materiaInfo.correlativas.paraRendir.map((nombre, i) => (
+                  {materiaInfo.correlativas.paraRendir.map((req) => (
                     <li
-                      key={i}
+                      key={req.id}
                       className="flex items-center gap-2 text-sm text-slate-300 bg-slate-800/50 border border-slate-800 rounded-lg px-3 py-2"
                     >
                       <span className="text-green-400 shrink-0">▸</span>
-                      <span className="break-words">{nombre}</span>
+                      <span className="break-words">{req.nombre}</span>
+                      <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wider text-green-400/80 border border-green-500/30 rounded-full px-2 py-0.5">
+                        aprobada
+                      </span>
                     </li>
                   ))}
                 </ul>
               </div>
             )}
 
-            {/* Solo muestra "no requiere correlativas" cuando ambas listas están vacías */}
-            {(!materiaInfo.correlativas?.paraCursar?.length &&
-              !materiaInfo.correlativas?.paraRendir?.length) && (
+            {/* Solo muestra "no requiere correlativas" cuando la materia NO tiene
+                correlativas en el esquema nuevo (paraCursar/paraRendir). */}
+            {!materiaInfo.correlativas?.paraCursar?.length &&
+              !materiaInfo.correlativas?.paraRendir?.length && (
               <p className="text-center text-slate-500 text-sm py-4">
                 Esta materia no requiere correlativas.
               </p>
