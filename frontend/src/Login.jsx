@@ -1,6 +1,8 @@
 import { useState } from 'react'
 
 function Login({ onLogin }) {
+  const API_URL = import.meta.env.VITE_BACKEND_URL || ''
+
   const [usuario, setUsuario] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -12,7 +14,7 @@ function Login({ onLogin }) {
     setCargando(true)
 
     try {
-      const respuesta = await fetch('/api/login', {
+      const respuesta = await fetch(`${API_URL}/api/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

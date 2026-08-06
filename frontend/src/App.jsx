@@ -29,6 +29,8 @@ const ESTILOS_ESTADO = {
 }
 
 function App() {
+  const API_URL = import.meta.env.VITE_BACKEND_URL || ''
+
   const [materias, setMaterias] = useState([])
   const [tituloIntermedio, setTituloIntermedio] = useState(false)
   const [token, setToken] = useState(() => localStorage.getItem('token'))
@@ -74,7 +76,7 @@ function App() {
 
     try {
       const respuesta = await verificarNoAutorizado(
-        await fetch(`/api/materias/${materia.id}/estado`, {
+        await fetch(`${API_URL}/api/materias/${materia.id}/estado`, {
           method: 'PATCH',
           headers: {
             'Content-Type': 'application/json',
@@ -147,7 +149,7 @@ function App() {
       try {
         // Cargar materias
         const respMaterias = await verificarNoAutorizado(
-          await fetch('/api/materias', {
+          await fetch(`${API_URL}/api/materias`, {
             headers: { Authorization: 'Bearer ' + token },
           })
         )
@@ -157,7 +159,7 @@ function App() {
 
         // Chequear si se obtuvo el título intermedio
         const respTitulo = await verificarNoAutorizado(
-          await fetch('/api/estadisticas/titulo-intermedio', {
+          await fetch(`${API_URL}/api/estadisticas/titulo-intermedio`, {
             headers: { Authorization: 'Bearer ' + token },
           })
         )
