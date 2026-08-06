@@ -332,19 +332,41 @@ function App() {
 
   // Determina si se cumplen las correlativas de una materia para el nivel dado.
   // Cada requisito de materia.correlativas[tipo] es { id, nombre, condicion }.
-  // - 'paraCursar': se respeta la condición individual de cada requisito
-  //   (regular o aprobada) cargada en el backend.
-  // - 'paraRendir': se exige estrictamente "aprobada" en cada requisito.
+  // ---------------------------------------------------------------------
+  // Regla 1: PARA CURSAR (poder pasar a "En Curso" o "Regular").
+  //   Se evalúa sobre materia.correlativas.paraCursar.
+  //   - Si el requisito exige condicion 'regular' (o no la especifica,
+  //     asumiendo 'regular'): alcanza con que el estado actual de esa
+  //     correlativa sea 'regular' o 'aprobada'.
+  //   - Si el requisito exige condicion 'aprobada' (explícita): el estado
+  //     actual DEBE ser 'aprobada'.
+  // ---------------------------------------------------------------------
+  // Regla 2: PARA RENDIR (poder pasar a "Aprobada").
+  //   Se evalúa sobre materia.correlativas.paraRendir.
+  //   - El estado actual de TODAS las correlativas DEBE ser
+  //     estrictamente 'aprobada'. Un estado 'regular' NO es suficiente.
+  // ---------------------------------------------------------------------
   const cumpleCorrelativas = (materia, tipo) => {
     const requisitos = (materia.correlativas && materia.correlativas[tipo]) || []
     if (requisitos.length === 0) return true
+
     return requisitos.every((req) => {
       const requisito = materias.find((m) => m.id === req.id)
       if (!requisito) return false
-      // paraRendir siempre exige "aprobada"; paraCursar usa la condición individual.
-      if (tipo === 'paraRendir' || req.condicion === 'aprobada') {
+
+      // Regla 2 (PARA RENDIR): se exige estrictamente 'aprobada'.
+      if (tipo === 'paraRendir') {
         return requisito.estado === 'aprobada'
       }
+
+      // Regla 1 (PARA CURSAR):
+      // Condición explícita 'aprobada' => el estado DEBE ser 'aprobada'.
+      if (req.condicion === 'aprobada') {
+        return requisito.estado === 'aprobada'
+      }
+
+      // Condición 'regular' (o sin especificar, asumida 'regular') =>
+      // alcanza con 'regular' o 'aprobada'.
       return requisito.estado === 'regular' || requisito.estado === 'aprobada'
     })
   }
