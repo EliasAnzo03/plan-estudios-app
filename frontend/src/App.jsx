@@ -396,12 +396,14 @@ function App() {
       {/* Barra de sesión y Header informativo */}
       <div className="max-w-6xl mx-auto flex justify-end mb-4 flex-wrap gap-2">
         <div className="flex items-center gap-3 flex-wrap">
-          {usuario && (
+          {/* En modo público nunca se muestran los controles de usuario/admin,
+              aunque exista una sesión en localStorage. */}
+          {!esModoPublico && usuario && (
             <span className="text-slate-500 text-xs font-mono uppercase tracking-wider">
               {usuario.username} · {usuario.rol}
             </span>
           )}
-          {usuario && usuario.rol === 'admin' && (
+          {!esModoPublico && usuario && usuario.rol === 'admin' && (
             <button
               onClick={() => {
                 const abrir = !mostrarPanelAdmin
@@ -486,8 +488,9 @@ function App() {
         </div>
       </div>
 
-      {/* Panel de administración: usuarios pendientes de aprobación */}
-      {usuario && usuario.rol === 'admin' && mostrarPanelAdmin && (
+      {/* Panel de administración: usuarios pendientes de aprobación
+          (nunca se muestra en modo público, aunque exista una sesión) */}
+      {!esModoPublico && usuario && usuario.rol === 'admin' && mostrarPanelAdmin && (
         <div className="max-w-6xl mx-auto mb-8">
           <div className="bg-slate-900 rounded-xl border border-slate-800 shadow-[0_0_25px_rgba(99,102,241,0.1)] p-6">
             <div className="flex items-center justify-between mb-4">
@@ -661,6 +664,16 @@ function App() {
                 // Regla 2: puede rendir (Aprobada) solo si paraRendir está estrictamente aprobada.
                 const puedeRendir = cumpleCorrelativas(materia, 'paraRendir')
 
+                // Badge de estado acorde a la leyenda superior:
+                // - Bloqueada: no cumple los requisitos para cursar.
+                // - Puedo Cursar: cumple los requisitos pero todavía está "pendiente".
+                // - Resto: usa el estado real (En Curso / Regular / Aprobada).
+                const badgeEtiqueta = !puedeCursar
+                  ? 'Bloqueada'
+                  : materia.estado === 'pendiente'
+                  ? 'Puedo Cursar'
+                  : estilo.etiqueta
+
                 // En modo público deshabilitamos el click para cambiar estados.
                 const editable = puedeCursar && !esModoPublico
 
@@ -683,7 +696,7 @@ function App() {
                         <span
                           className={`text-xs font-bold tracking-widest uppercase px-2 py-1 rounded-full ${estilo.badge}`}
                         >
-                          {estilo.etiqueta}
+                          {badgeEtiqueta}
                         </span>
                         <button
                           onClick={(e) => {
