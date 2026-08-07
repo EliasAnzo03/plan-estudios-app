@@ -222,11 +222,8 @@ function App() {
   const guardarNota = async (materiaId, valor) => {
     // Permitimos vacío (limpiará la nota)
     if (valor === '') {
-      setMaterias((prev) =>
-        prev.map((m) => (m.id === materiaId ? { ...m, nota: null } : m))
-      )
       try {
-        await verificarNoAutorizado(
+        const respuesta = await verificarNoAutorizado(
           await fetch(`${API_URL}/api/materias/${materiaId}/nota`, {
             method: 'PUT',
             headers: {
@@ -235,6 +232,15 @@ function App() {
             },
             body: JSON.stringify({ nota: null }),
           })
+        )
+        // Solo actualizamos el estado local si el backend confirmó el cambio.
+        // Si falla, no borramos visualmente la nota (la UI queda sincronizada).
+        if (!respuesta.ok) {
+          console.error('Error al limpiar la nota')
+          return
+        }
+        setMaterias((prev) =>
+          prev.map((m) => (m.id === materiaId ? { ...m, nota: null } : m))
         )
       } catch (error) {
         console.error('Error de red al guardar la nota:', error)

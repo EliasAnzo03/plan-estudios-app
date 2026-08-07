@@ -54,7 +54,7 @@ app.post('/api/login', async (req, res) => {
 
     // Verificación de la contraseña (bcrypt iguala el hash)
     const passwordCorrecta =
-      usuario && bcrypt.compareSync(password, usuario.password_hash);
+      usuario && (await bcrypt.compare(password, usuario.password_hash));
 
     if (!usuario || !passwordCorrecta) {
       return res.status(401).json({ error: 'Credenciales inválidas' });
@@ -139,7 +139,7 @@ app.post('/api/register', async (req, res) => {
     }
 
     const SALT_ROUNDS = 10;
-    const passwordHash = bcrypt.hashSync(password, SALT_ROUNDS);
+    const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
 
     // Guardamos el usuario con rol 'user' y sin aprobación (pendiente de admin).
     // carrera_id es opcional: si no se envía, se guarda null (legacy).
@@ -199,6 +199,55 @@ function requiereRol(rolEsperado) {
 }
 
 // ---------------------------------------------------------------------------
+// HELPER: resolverUsuarioId
+// Resuelve el usuario_id a partir de una autenticación híbrida:
+//   1) Token JWT en el header Authorization (Bearer).
+//   2) En su defecto, modo público (?view=public&user=<id>), si es válido.
+// Devuelve { usuario_id, esPublico } o null si no se pudo resolver ninguna.
+// Se usa en GET /api/materias y GET /api/estadisticas/titulo-intermedio
+// para evitar duplicar la lógica de autenticación.
+// ---------------------------------------------------------------------------
+async function resolverUsuarioId(req) {
+  let usuario_id = null;
+  let esPublico = false;
+
+  // 1) Intentar autenticar con el token (si viene presente y es válido).
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.split(' ')[1];
+    try {
+      const payload = jwt.verify(token, JWT_SECRET);
+      usuario_id = payload.id;
+    } catch (error) {
+      // Token inválido: se intentará el modo público a continuación.
+    }
+  }
+
+  // 2) Si no hay token válido, intentamos el modo público con el query param
+  //    `user`. Requiere que `view=public` esté presente para ser explícito.
+  if (usuario_id === null) {
+    if (req.query.view === 'public' && req.query.user) {
+      esPublico = true;
+      const idPublico = Number(req.query.user);
+      if (!Number.isNaN(idPublico)) {
+        // Verificamos que el usuario exista (no exponer datos de ids inexistentes)
+        const existe = await pool.query('SELECT id FROM usuarios WHERE id = $1', [idPublico]);
+        if (existe.rows.length > 0) {
+          usuario_id = idPublico;
+        }
+      }
+    }
+  }
+
+  // Sin token válido y sin usuario público válido => no se pudo resolver.
+  if (usuario_id === null) {
+    return null;
+  }
+
+  return { usuario_id, esPublico };
+}
+
+// ---------------------------------------------------------------------------
 // POST /api/admin/usuarios  (solo admin) - Sistema Invite-Only
 // El admin crea la cuenta de un compañero con rol 'user'. El sistema es
 // cerrado: no hay registro público, solo el admin puede dar de alta usuarios.
@@ -223,7 +272,7 @@ app.post('/api/admin/usuarios', verificarToken, requiereRol('admin'), async (req
     }
 
     const SALT_ROUNDS = 10;
-    const passwordHash = bcrypt.hashSync(password, SALT_ROUNDS);
+    const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
 
     // Creamos el usuario con rol 'user' (invitado) y aprobado (lo da de alta el admin)
     const info = await pool.query(`
@@ -234,18 +283,22 @@ app.post('/api/admin/usuarios', verificarToken, requiereRol('admin'), async (req
 
     const nuevoUsuarioId = info.rows[0].id;
 
-    // Asignación inicial: todas las materias existentes en estado 'pendiente'
+    // Asignación inicial: todas las materias existentes en estado 'pendiente'.
+    // Bulk insert de una sola vez (evita el problema N+1 de un INSERT por materia).
     const materiasResult = await pool.query('SELECT id FROM materias');
     const materias = materiasResult.rows;
 
     let materiasAsignadas = 0;
-    for (const materia of materias) {
-      const resumen = await pool.query(`
+    if (materias.length > 0) {
+      const valores = materias
+        .map(() => `($1, $2, 'pendiente')`)
+        .join(', ');
+      const resultado = await pool.query(`
         INSERT INTO usuario_materia (usuario_id, materia_id, estado)
-        VALUES ($1, $2, 'pendiente')
+        VALUES ${valores}
         ON CONFLICT (usuario_id, materia_id) DO NOTHING
-      `, [nuevoUsuarioId, materia.id]);
-      materiasAsignadas += resumen.rowCount;
+      `, [nuevoUsuarioId, ...materias.map((m) => m.id)]);
+      materiasAsignadas = resultado.rowCount;
     }
 
     res.status(201).json({
@@ -413,41 +466,12 @@ app.put('/api/admin/users/:id/approve', verificarToken, requiereRol('admin'), as
 //    verificarToken / requiereRol.
 // ---------------------------------------------------------------------------
 app.get('/api/materias', async (req, res) => {
-  let usuario_id = null;
-  let esPublico = false; // true cuando la petición se resuelve por link público
-
-  // 1) Intentar autenticar con el token (si viene presente y es válido).
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    const token = authHeader.split(' ')[1];
-    try {
-      const payload = jwt.verify(token, JWT_SECRET);
-      usuario_id = payload.id;
-    } catch (error) {
-      // Token inválido: no autorizamos; si no hay público válido, será 401.
-    }
+  // Resolución híbrida de usuario (token o modo público) mediante helper.
+  const autenticado = await resolverUsuarioId(req);
+  if (!autenticado) {
+    return res.status(401).json({ error: 'Token no proporcionado o usuario público inválido' });
   }
-
-  // 2) Si no hay token válido, intentamos el modo público con el query param
-  //    `user`. Requiere que `view=public` esté presente para ser explícito.
-  if (usuario_id === null) {
-    if (req.query.view === 'public' && req.query.user) {
-      esPublico = true;
-      const idPublico = Number(req.query.user);
-      if (!Number.isNaN(idPublico)) {
-        // Verificamos que el usuario exista (no exponer datos de ids inexistentes)
-        const existe = await pool.query('SELECT id FROM usuarios WHERE id = $1', [idPublico]);
-        if (existe.rows.length > 0) {
-          usuario_id = idPublico;
-        }
-      }
-    }
-
-    // Sin token válido y sin usuario público válido => no autorizado.
-    if (usuario_id === null) {
-      return res.status(401).json({ error: 'Token no proporcionado o usuario público inválido' });
-    }
-  }
+  const { usuario_id, esPublico } = autenticado;
 
   try {
     // Obtenemos el carrera_id del usuario autenticado.
@@ -475,16 +499,20 @@ app.get('/api/materias', async (req, res) => {
       WHERE m.carrera_id = $2
       ORDER BY m.anio ASC, m.cuatrimestre ASC
     `;
+    // Solo se traen las correlativas de la carrera del usuario (optimización:
+    // evita cargar correlativas de otras carreras, p. ej. Lic. en Educación).
     const sqlCorrelativas = `
       SELECT c.materia_id, c.requiere_id, c.tipo_requisito, c.condicion_requerida,
              req.id AS req_id, req.nombre AS req_nombre
       FROM correlativas c
       JOIN materias req ON req.id = c.requiere_id
+      JOIN materias m ON m.id = c.materia_id
+      WHERE m.carrera_id = $1
       ORDER BY c.materia_id ASC
     `;
 
     const materiasResult = await pool.query(sqlMaterias, [usuario_id, carrera_id]);
-    const correlativasResult = await pool.query(sqlCorrelativas);
+    const correlativasResult = await pool.query(sqlCorrelativas, [carrera_id]);
     const materias = materiasResult.rows;
     const correlativas = correlativasResult.rows;
 
@@ -659,35 +687,10 @@ app.get('/api/materias/:id/correlativas', verificarToken, async (req, res) => {
 // Igual que GET /api/materias, admite modo público (?view=public&user=<id>).
 // ---------------------------------------------------------------------------
 app.get('/api/estadisticas/titulo-intermedio', async (req, res) => {
-  let usuario_id = null;
-
-  // 1) Intentar autenticar con el token (si viene presente y es válido).
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    const token = authHeader.split(' ')[1];
-    try {
-      const payload = jwt.verify(token, JWT_SECRET);
-      usuario_id = payload.id;
-    } catch (error) {
-      // Token inválido: ver el modo público a continuación.
-    }
-  }
-
-  // 2) Modo público (?view=public&user=<id>): sin token.
-  if (usuario_id === null) {
-    if (req.query.view === 'public' && req.query.user) {
-      const idPublico = Number(req.query.user);
-      if (!Number.isNaN(idPublico)) {
-        const existe = await pool.query('SELECT id FROM usuarios WHERE id = $1', [idPublico]);
-        if (existe.rows.length > 0) {
-          usuario_id = idPublico;
-        }
-      }
-    }
-
-    if (usuario_id === null) {
-      return res.status(401).json({ error: 'Token no proporcionado o usuario público inválido' });
-    }
+  // Resolución híbrida de usuario (token o modo público) mediante helper.
+  const autenticado = await resolverUsuarioId(req);
+  if (!autenticado) {
+    return res.status(401).json({ error: 'Token no proporcionado o usuario público inválido' });
   }
 
   // Obtenemos el carrera_id del usuario autenticado.
@@ -696,10 +699,11 @@ app.get('/api/estadisticas/titulo-intermedio', async (req, res) => {
   // (Ingeniería Informática).
   const usuarioResult = await pool.query(
     'SELECT carrera_id FROM usuarios WHERE id = $1',
-    [usuario_id]
+    [autenticado.usuario_id]
   );
   const usuarioCarrera = usuarioResult.rows[0];
   const carrera_id = (usuarioCarrera && usuarioCarrera.carrera_id) || 1;
+  const usuario_id = autenticado.usuario_id;
 
   try {
     // Total de materias del título intermedio (1°, 2° y 3°) que el usuario
