@@ -36,8 +36,8 @@ const materiasInformatica = [
   { "nro": 34, "nombre": "Arquitectura de Software", "anio": 5, "cuatrimestre": "1", "tipo": "obligatoria", "req_reg_cursar": [27], "req_aprob_cursar": [20], "req_aprob_rendir": [27] },
   { "nro": 35, "nombre": "Reingeniería de las Organizaciones y de los Sist. de Información", "anio": 5, "cuatrimestre": "1", "tipo": "obligatoria", "req_reg_cursar": [25, 27], "req_aprob_cursar": [20, 21], "req_aprob_rendir": [25, 27] },
   { "nro": 36, "nombre": "Administración y Evaluación Financiera de Proyectos Informáticos", "anio": 5, "cuatrimestre": "1", "tipo": "obligatoria", "req_reg_cursar": [25], "req_aprob_cursar": [21], "req_aprob_rendir": [25] },
-  { "nro": 37, "nombre": "Optativa (Mínimo 75 hs.)", "anio": 5, "cuatrimestre": "1", "tipo": "optativa", "req_reg_cursar": [], "req_aprob_cursar": [], "req_aprob_rendir": [] },
-  { "nro": 38, "nombre": "Optativa (Mínimo 75 hs.)", "anio": 5, "cuatrimestre": "2", "tipo": "optativa", "req_reg_cursar": [], "req_aprob_cursar": [], "req_aprob_rendir": [] },
+  { "nro": 37, "nombre": "Optativa 1 (Mínimo 75 hs.)", "anio": 5, "cuatrimestre": "1", "tipo": "optativa", "req_reg_cursar": [], "req_aprob_cursar": [], "req_aprob_rendir": [] },
+  { "nro": 38, "nombre": "Optativa 2 (Mínimo 75 hs.)", "anio": 5, "cuatrimestre": "2", "tipo": "optativa", "req_reg_cursar": [], "req_aprob_cursar": [], "req_aprob_rendir": [] },
   { "nro": 39, "nombre": "Práctica Profesional Supervisada", "anio": 5, "cuatrimestre": "2", "tipo": "obligatoria", "req_reg_cursar": [], "req_aprob_cursar": [], "req_aprob_rendir": [] },
   { "nro": 40, "nombre": "Proyecto Integrador", "anio": 5, "cuatrimestre": "2", "tipo": "obligatoria", "req_reg_cursar": [], "req_aprob_cursar": [], "req_aprob_rendir": [] }
 ];
