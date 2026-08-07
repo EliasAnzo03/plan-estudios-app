@@ -9,12 +9,19 @@ const { pool, initSchema } = require('./db.js');
 const app = express();
 const port = 3000;
 
-app.use(cors());
+app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:5173' }));
 
 // Clave secreta para firmar los JWT.
 // En producción debe salir de una variable de entorno (process.env.JWT_SECRET).
-const JWT_SECRET = process.env.JWT_SECRET || 'clave_secreta_de_desarrollo';
+const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = '8h';
+
+// Validación crítica: si no hay secret, la app no debe arrancar
+// (un fallback en texto plano sería un riesgo de seguridad).
+if (!JWT_SECRET) {
+  console.error('FATAL ERROR: JWT_SECRET no está definido.');
+  process.exit(1);
+}
 
 // Estados válidos para una materia
 const ESTADOS_VALIDOS = ['pendiente', 'en_curso', 'regular', 'aprobada'];
@@ -78,7 +85,8 @@ app.post('/api/login', async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
@@ -94,7 +102,8 @@ app.get('/api/carreras', async (req, res) => {
     );
     res.json(resultado.rows);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
@@ -144,7 +153,8 @@ app.post('/api/register', async (req, res) => {
       usuario: { username, rol: 'user', is_approved: false, carrera_id: carrera_id || null }
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
@@ -244,7 +254,8 @@ app.post('/api/admin/usuarios', verificarToken, requiereRol('admin'), async (req
       materias_asignadas: materiasAsignadas
     });
   } catch (error) {
-  res.status(500).json({ error: error.message });
+  console.error(error);
+  res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
@@ -284,7 +295,8 @@ app.delete('/api/admin/usuarios/:id', verificarToken, requiereRol('admin'), asyn
       usuario: { id: usuario.id, username: usuario.username, rol: usuario.rol }
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
@@ -316,7 +328,8 @@ app.get('/api/admin/usuarios', verificarToken, requiereRol('admin'), async (req,
       usuarios
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
@@ -343,7 +356,8 @@ app.get('/api/admin/users', verificarToken, requiereRol('admin'), async (req, re
       usuarios
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
@@ -382,7 +396,8 @@ app.put('/api/admin/users/:id/approve', verificarToken, requiereRol('admin'), as
       usuario: { id: usuario.id, username: usuario.username, rol: usuario.rol, is_approved: true }
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 // ---------------------------------------------------------------------------
@@ -399,6 +414,7 @@ app.put('/api/admin/users/:id/approve', verificarToken, requiereRol('admin'), as
 // ---------------------------------------------------------------------------
 app.get('/api/materias', async (req, res) => {
   let usuario_id = null;
+  let esPublico = false; // true cuando la petición se resuelve por link público
 
   // 1) Intentar autenticar con el token (si viene presente y es válido).
   const authHeader = req.headers.authorization;
@@ -416,6 +432,7 @@ app.get('/api/materias', async (req, res) => {
   //    `user`. Requiere que `view=public` esté presente para ser explícito.
   if (usuario_id === null) {
     if (req.query.view === 'public' && req.query.user) {
+      esPublico = true;
       const idPublico = Number(req.query.user);
       if (!Number.isNaN(idPublico)) {
         // Verificamos que el usuario exista (no exponer datos de ids inexistentes)
@@ -502,6 +519,8 @@ app.get('/api/materias', async (req, res) => {
       const req = requisitosPorMateria.get(materia.id) || { paraCursar: [], paraRendir: [], ids: new Set() };
       return {
         ...materia,
+        // En modo público se oculta la nota por privacidad (solo estado).
+        nota: esPublico ? null : materia.nota,
         correlativas: {
           paraCursar: req.paraCursar,
           paraRendir: req.paraRendir
@@ -511,7 +530,8 @@ app.get('/api/materias', async (req, res) => {
     });
     res.json(resultado);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
@@ -552,7 +572,8 @@ app.patch('/api/materias/:id/estado', verificarToken, async (req, res) => {
 
     res.json({ message: 'Estado actualizado correctamente', estado, materia_id: Number(id) });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
@@ -600,7 +621,8 @@ app.put('/api/materias/:id/nota', verificarToken, async (req, res) => {
       materia_id: Number(id)
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
@@ -626,7 +648,8 @@ app.get('/api/materias/:id/correlativas', verificarToken, async (req, res) => {
 
     res.json(resultado.rows);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
@@ -694,7 +717,8 @@ app.get('/api/estadisticas/titulo-intermedio', async (req, res) => {
     const total = Number(resultado.rows[0].total);
     res.json({ obtenido: total === 0 });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
@@ -737,7 +761,8 @@ app.post('/api/materias', verificarToken, requiereRol('admin'), async (req, res)
       tipo
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
@@ -767,7 +792,8 @@ app.post('/api/correlativas', verificarToken, requiereRol('admin'), async (req, 
 
     res.status(201).json({ message: 'Relación de correlatividad creada' });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
@@ -790,7 +816,8 @@ app.delete('/api/materias/:id', verificarToken, requiereRol('admin'), async (req
 
     res.json({ message: 'Materia eliminada correctamente' });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
@@ -811,7 +838,8 @@ app.get('/api/parciales', verificarToken, async (req, res) => {
 
     res.json(resultado.rows);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
@@ -848,7 +876,8 @@ app.post('/api/parciales', verificarToken, async (req, res) => {
 
     res.status(201).json(resultado.rows[0]);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
@@ -875,7 +904,8 @@ app.delete('/api/parciales/:id', verificarToken, async (req, res) => {
 
     res.json({ message: 'Parcial eliminado correctamente', id: Number(id) });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
