@@ -428,48 +428,37 @@ function App() {
   //   - El estado actual de TODAS las correlativas DEBE ser
   //     estrictamente 'aprobada'. Un estado 'regular' NO es suficiente.
   // ---------------------------------------------------------------------
+  // Pre-indexa las materias por id en un objeto para búsquedas O(1) de requisitos.
+  // (En lugar de hacer múltiples .find sobre el array, lo que era O(n²)).
+  const indiceMaterias = Object.fromEntries(
+    materias.map((m) => [m.id, m])
+  )
+
+  // Valida si UN requisito ({ id, nombre, condicion }) está cumplido según el
+  // estado actual del usuario. 'tipo' indica 'paraCursar' o 'paraRendir'.
+  // - 'paraRendir': siempre exige el estado 'aprobada'.
+  // - 'paraCursar': si exige condicion 'aprobada' => exige 'aprobada'; si
+  //   exige 'regular' (o no especifica) => 'regular' o 'aprobada'.
+  const cumpleRequisitoEstado = (req, tipo) => {
+    const requisito = indiceMaterias[req.id]
+    if (!requisito) return false
+
+    if (tipo === 'paraRendir' || req.condicion === 'aprobada') {
+      return requisito.estado === 'aprobada'
+    }
+    return requisito.estado === 'regular' || requisito.estado === 'aprobada'
+  }
+
   const cumpleCorrelativas = (materia, tipo) => {
     const requisitos = (materia.correlativas && materia.correlativas[tipo]) || []
-    if (requisitos.length === 0) return true
-
-    return requisitos.every((req) => {
-      const requisito = materias.find((m) => m.id === req.id)
-      if (!requisito) return false
-
-      // Regla 2 (PARA RENDIR): se exige estrictamente 'aprobada'.
-      if (tipo === 'paraRendir') {
-        return requisito.estado === 'aprobada'
-      }
-
-      // Regla 1 (PARA CURSAR):
-      // Condición explícita 'aprobada' => el estado DEBE ser 'aprobada'.
-      if (req.condicion === 'aprobada') {
-        return requisito.estado === 'aprobada'
-      }
-
-      // Condición 'regular' (o sin especificar, asumida 'regular') =>
-      // alcanza con 'regular' o 'aprobada'.
-      return requisito.estado === 'regular' || requisito.estado === 'aprobada'
-    })
+    return requisitos.every((req) => cumpleRequisitoEstado(req, tipo))
   }
 
   // Determina si el usuario YA cumple con UN requisito concreto de una materia.
   // 'tipo' indica si el requisito pertenece a 'paraCursar' o 'paraRendir'.
   // Se usa en el modal de correlativas para mostrar ✅/❌ por cada requisito.
-  // - 'paraRendir': siempre exige 'aprobada'.
-  // - 'paraCursar': si exige 'aprobada' => 'aprobada'; si exige 'regular'
-  //   (o no especifica) => 'regular' o 'aprobada'.
-  const cumpleRequisito = (req, tipo) => {
-    const requisito = materias.find((m) => m.id === req.id)
-    if (!requisito) return false
-    if (tipo === 'paraRendir') {
-      return requisito.estado === 'aprobada'
-    }
-    if (req.condicion === 'aprobada') {
-      return requisito.estado === 'aprobada'
-    }
-    return requisito.estado === 'regular' || requisito.estado === 'aprobada'
-  }
+  // Comparte la misma lógica de validación que cumpleCorrelativas.
+  const cumpleRequisito = (req, tipo) => cumpleRequisitoEstado(req, tipo)
 
   useEffect(() => {
     // En modo público no hay token; la grilla se resuelve desde publicUserId.

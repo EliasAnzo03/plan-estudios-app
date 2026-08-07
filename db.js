@@ -10,8 +10,6 @@ const pool = new Pool({
 
 async function initSchema() {
   await pool.query(`
-    -- (BORRAMOS EL DROP TABLE)
-
     -- Tabla de carreras (multi-tenant / multi-carrera)
     CREATE TABLE IF NOT EXISTS carreras (
       id SERIAL PRIMARY KEY,

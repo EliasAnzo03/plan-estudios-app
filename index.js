@@ -4,7 +4,7 @@ const jwt = require('jsonwebtoken');
 require('dotenv').config();
 const cors = require('cors');
 // Conexión centralizada y esquema multitenant definidos en db.js
-const { pool, initSchema } = require('./db.js');
+const { pool } = require('./db.js');
 
 const app = express();
 const port = 3000;
@@ -307,8 +307,8 @@ app.post('/api/admin/usuarios', verificarToken, requiereRol('admin'), async (req
       materias_asignadas: materiasAsignadas
     });
   } catch (error) {
-  console.error(error);
-  res.status(500).json({ error: 'Error interno del servidor' });
+    console.error(error);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
