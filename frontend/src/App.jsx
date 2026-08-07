@@ -585,7 +585,7 @@ function App() {
           Malla Curricular - Correlativas
         </p>
         <span className="text-xs font-semibold uppercase tracking-widest text-slate-400 border border-slate-700 rounded-full px-3 py-1">
-          Plan de Estudios (2/25)
+          PLAN DE ESTUDIOS ({usuario?.carrera_plan || 'S/P'})
         </span>
         {!esModoPublico && (
           <p className="text-slate-600 text-xs font-mono mt-2 text-center">

@@ -44,7 +44,8 @@ app.post('/api/login', async (req, res) => {
 
   try {
     const resultado = await pool.query(
-      `SELECT u.id, u.username, u.password_hash, u.rol, u.is_approved, c.nombre AS carrera_nombre
+      `SELECT u.id, u.username, u.password_hash, u.rol, u.is_approved,
+              c.nombre AS carrera_nombre, c.plan AS carrera_plan
        FROM usuarios u
        LEFT JOIN carreras c ON c.id = u.carrera_id
        WHERE u.username = $1`,
@@ -81,7 +82,8 @@ app.post('/api/login', async (req, res) => {
         username: usuario.username,
         rol: usuario.rol,
         is_approved: usuario.is_approved,
-        carrera_nombre: usuario.carrera_nombre || null
+        carrera_nombre: usuario.carrera_nombre || null,
+        carrera_plan: usuario.carrera_plan || null
       }
     });
   } catch (error) {
