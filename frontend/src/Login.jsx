@@ -104,10 +104,10 @@ function Login({ onLogin }) {
         {/* Título del sistema */}
         <div className="text-center mb-8">
           <h1 className="text-indigo-500 text-2xl font-bold tracking-[0.3em] drop-shadow-md uppercase">
-            Ingeniería Informática
+            Tracker Académico
           </h1>
           <p className="text-slate-500 text-sm tracking-widest uppercase mt-2">
-            Malla Curricular - Acceso
+            Gestión de Planes de Estudio
           </p>
         </div>
 

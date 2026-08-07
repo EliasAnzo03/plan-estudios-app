@@ -37,7 +37,10 @@ app.post('/api/login', async (req, res) => {
 
   try {
     const resultado = await pool.query(
-      'SELECT id, username, password_hash, rol, is_approved FROM usuarios WHERE username = $1',
+      `SELECT u.id, u.username, u.password_hash, u.rol, u.is_approved, c.nombre AS carrera_nombre
+       FROM usuarios u
+       LEFT JOIN carreras c ON c.id = u.carrera_id
+       WHERE u.username = $1`,
       [username]
     );
     const usuario = resultado.rows[0];
@@ -66,7 +69,13 @@ app.post('/api/login', async (req, res) => {
 
     res.json({
       token,
-      usuario: { id: usuario.id, username: usuario.username, rol: usuario.rol, is_approved: usuario.is_approved }
+      usuario: {
+        id: usuario.id,
+        username: usuario.username,
+        rol: usuario.rol,
+        is_approved: usuario.is_approved,
+        carrera_nombre: usuario.carrera_nombre || null
+      }
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -292,7 +301,7 @@ app.get('/api/admin/usuarios', verificarToken, requiereRol('admin'), async (req,
     const resultado = await pool.query(`
       SELECT u.id, u.username, u.rol, u.is_approved,
              c.nombre AS carrera_nombre,
-             (SELECT COUNT(*) FROM usuario_materia um WHERE um.usuario_id = u.id) AS materias_totales,
+             (SELECT COUNT(*) FROM materias m WHERE m.carrera_id = u.carrera_id) AS materias_totales,
              (SELECT COUNT(*) FROM usuario_materia um
                WHERE um.usuario_id = u.id AND um.estado = 'aprobada') AS materias_aprobadas
       FROM usuarios u
