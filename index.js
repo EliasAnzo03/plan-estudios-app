@@ -588,13 +588,28 @@ app.patch('/api/materias/:id/estado', verificarToken, async (req, res) => {
   }
 
   try {
-    // Verificamos que la materia exista en la grilla global
+    // Verificamos que la materia exista y traemos la nota ACTUAL (si la hay)
+    // para validar que una "Aprobada" no tenga nota < 4.
     const materiaResult = await pool.query(
-      'SELECT id FROM materias WHERE id = $1',
-      [id]
+      `SELECT m.id,
+              um.nota AS nota
+       FROM materias m
+       LEFT JOIN usuario_materia um
+         ON um.materia_id = m.id AND um.usuario_id = $1
+       WHERE m.id = $2`,
+      [usuario_id, Number(id)]
     );
     if (materiaResult.rows.length === 0) {
       return res.status(404).json({ error: 'Materia no encontrada' });
+    }
+    const notaActual = materiaResult.rows[0].nota;
+
+    // Regla de negocio: si se marca como "Aprobada" y ya hay una nota cargada
+    // menor a 4, se rechaza (no puede haber una aprobada con nota < 4).
+    if (estado === 'aprobada' && notaActual !== null && notaActual < 4) {
+      return res.status(400).json({
+        error: 'Una materia aprobada no puede tener una nota menor a 4. Corregí la nota antes de marcarla como aprobada'
+      });
     }
 
     // UPSERT: inserta si no existe la dupla (usuario_id, materia_id),
@@ -634,12 +649,27 @@ app.put('/api/materias/:id/nota', verificarToken, async (req, res) => {
   }
 
   try {
+    // Traemos la materia junto al estado ACTUAL del usuario en ella para validar
+    // la regla de negocio: si la materia está aprobada, la nota no puede ser < 4.
     const materiaResult = await pool.query(
-      'SELECT id FROM materias WHERE id = $1',
-      [id]
+      `SELECT m.id,
+              COALESCE(um.estado, 'pendiente') AS estado
+       FROM materias m
+       LEFT JOIN usuario_materia um
+         ON um.materia_id = m.id AND um.usuario_id = $1
+       WHERE m.id = $2`,
+      [usuario_id, Number(id)]
     );
     if (materiaResult.rows.length === 0) {
       return res.status(404).json({ error: 'Materia no encontrada' });
+    }
+    const estadoMateria = materiaResult.rows[0].estado;
+
+    // Regla de negocio: una materia "Aprobada" no puede tener una nota menor a 4.
+    if (nota !== null && estadoMateria === 'aprobada' && nota < 4) {
+      return res.status(400).json({
+        error: 'Una materia aprobada no puede tener una nota menor a 4'
+      });
     }
 
     // UPSERT: inserta la fila usuario_materia si no existe (con su estado actual)

@@ -34,6 +34,9 @@ function App() {
 
   const [materias, setMaterias] = useState([])
   const [tituloIntermedio, setTituloIntermedio] = useState(false)
+  // Errores de nota por materia (clave: materia.id). Se usa para avisar cuando
+  // el usuario intenta guardar una nota < 4 en una materia "Aprobada".
+  const [erroresNota, setErroresNota] = useState({})
   const [mostrarPanelAdmin, setMostrarPanelAdmin] = useState(false)
   const [mostrarPanelUsuarios, setMostrarPanelUsuarios] = useState(false)
   const [usuariosPendientes, setUsuariosPendientes] = useState([])
@@ -242,6 +245,12 @@ function App() {
         setMaterias((prev) =>
           prev.map((m) => (m.id === materiaId ? { ...m, nota: null } : m))
         )
+        // Al limpiar la nota se descarta el error del campo de esa materia.
+        setErroresNota((prev) => {
+          const copia = { ...prev }
+          delete copia[materiaId]
+          return copia
+        })
       } catch (error) {
         console.error('Error de red al guardar la nota:', error)
       }
@@ -249,9 +258,23 @@ function App() {
     }
 
     const notaNum = Number(valor)
-    if (isNaN(notaNum) || notaNum < 1 || notaNum > 10) {
+
+    // El input de nota solo se muestra en materias "Aprobadas", por lo que la
+    // nota mínima permitida debe ser 4. Si el usuario ingresa un valor menor,
+    // mostramos un mensaje de error y no enviamos la petición al backend.
+    if (isNaN(notaNum) || notaNum < 4 || notaNum > 10) {
+      setErroresNota((prev) => ({
+        ...prev,
+        [materiaId]: 'La nota de una materia aprobada no puede ser menor a 4',
+      }))
       return
     }
+    // Valor válido: descartamos el error del campo de esa materia.
+    setErroresNota((prev) => {
+      const copia = { ...prev }
+      delete copia[materiaId]
+      return copia
+    })
 
     try {
       const respuesta = await verificarNoAutorizado(
@@ -901,22 +924,33 @@ function App() {
                         </div>
                       ) : (
                         <div
-                          className="w-full flex items-center gap-2"
+                          className="w-full flex flex-col"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <label className="text-[10px] uppercase tracking-wider text-green-400/80 font-semibold shrink-0">
-                            Nota
-                          </label>
-                          <input
-                            type="number"
-                            min="1"
-                            max="10"
-                            step="0.5"
-                            placeholder="1-10"
-                            value={materia.nota ?? ''}
-                            onChange={(e) => guardarNota(materia.id, e.target.value)}
-                            className="w-20 px-2 py-1 rounded-lg bg-slate-800 border border-green-500/40 text-green-300 text-sm font-mono text-center focus:outline-none focus:ring-2 focus:ring-green-500/50 focus:border-green-500 placeholder:text-slate-600"
-                          />
+                          <div className="w-full flex items-center gap-2">
+                            <label className="text-[10px] uppercase tracking-wider text-green-400/80 font-semibold shrink-0">
+                              Nota
+                            </label>
+                            <input
+                              type="number"
+                              min="4"
+                              max="10"
+                              step="0.5"
+                              placeholder="4-10"
+                              value={materia.nota ?? ''}
+                              onChange={(e) => guardarNota(materia.id, e.target.value)}
+                              className={`w-20 px-2 py-1 rounded-lg bg-slate-800 border text-green-300 text-sm font-mono text-center focus:outline-none focus:ring-2 placeholder:text-slate-600 ${
+                                erroresNota[materia.id]
+                                  ? 'border-red-500/60 focus:ring-red-500/50 focus:border-red-500'
+                                  : 'border-green-500/40 focus:ring-green-500/50 focus:border-green-500'
+                              }`}
+                            />
+                          </div>
+                          {erroresNota[materia.id] && (
+                            <p className="w-full text-center text-[10px] text-red-400 mt-1">
+                              {erroresNota[materia.id]}
+                            </p>
+                          )}
                         </div>
                       )
                     )}
