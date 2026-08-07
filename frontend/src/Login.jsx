@@ -17,7 +17,14 @@ function Login({ onLogin }) {
   useEffect(() => {
     const cargarCarreras = async () => {
       try {
-        const respuesta = await fetch(`${API_URL}/api/carreras`)
+        // cache:'no-store' + Cache-Control evitan que el navegador devuelva
+        // una respuesta vieja de GET /api/carreras cuando se agregan nuevas
+        // carreras en el backend (ej. a través del seeder). Así, al recargar
+        // la página siempre se traen los datos frescos.
+        const respuesta = await fetch(`${API_URL}/api/carreras`, {
+          cache: 'no-store',
+          headers: { 'Cache-Control': 'no-cache' },
+        })
         const datos = await respuesta.json()
         if (respuesta.ok) {
           setCarreras(Array.isArray(datos) ? datos : [])

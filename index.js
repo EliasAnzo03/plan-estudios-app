@@ -102,6 +102,12 @@ app.get('/api/carreras', async (req, res) => {
     const resultado = await pool.query(
       'SELECT id, nombre, plan FROM carreras ORDER BY id ASC'
     );
+    // Headers anti-caché: evitan que el navegador (o un proxy) sirva una
+    // respuesta vieja del GET /api/carreras cuando se agregan nuevas carreras
+    // a través del seeder y el usuario recarga la página.
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     res.json(resultado.rows);
   } catch (error) {
     console.error(error);
