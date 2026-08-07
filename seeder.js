@@ -44,56 +44,51 @@ async function ejecutarSeed() {
     console.log(`\n--- Procesando carrera: ${carrera.nombre} (plan ${carrera.plan}) ---`);
 
     // VERIFICAR primero si la carrera ya existe (upsert no destructivo).
-    let carreraRow = await pool.query(
-      'SELECT id FROM carreras WHERE nombre = $1 AND plan = $2',
-      [carrera.nombre, carrera.plan]
-    );
-
-    let carreraId;
-    if (carreraRow.rows.length > 0) {
-      // Ya existe: recuperamos su id sin re-insertarla.
-      carreraId = carreraRow.rows[0].id;
-      console.log(`Carrera ya existente (id=${carreraId}), no se vuelve a insertar`);
-    } else {
-      const ins = await pool.query(`
-        INSERT INTO carreras (nombre, plan)
-        VALUES ($1, $2)
-        RETURNING id
-      `, [carrera.nombre, carrera.plan]);
-      carreraId = ins.rows[0].id;
-      console.log(`Carrera creada (id=${carreraId})`);
-    }
+    // Usamos ON CONFLICT (nombre, plan) DO UPDATE para que la query
+    // SIEMPRE devuelva el id (sea nuevo o existente) y no duplicarla.
+    const insCarrera = await pool.query(`
+      INSERT INTO carreras (nombre, plan)
+      VALUES ($1, $2)
+      ON CONFLICT (nombre, plan)
+      DO UPDATE SET nombre = EXCLUDED.nombre
+      RETURNING id
+    `, [carrera.nombre, carrera.plan]);
+    const carreraId = insCarrera.rows[0].id;
+    console.log(`Carrera sincronizada (id=${carreraId}, ${carrera.nombre})`);
 
     const mapaIds = {};
     let nuevasMaterias = 0;
     console.log(`Sincronizando materias de ${carrera.materias.length} materias...`);
     for (const materia of carrera.materias) {
-      // VERIFICAR primero si la materia ya existe para esta carrera.
-      // Como NO hay una constraint UNIQUE sobre (nombre, carrera_id) en la tabla,
-      // hacemos un SELECT y reutilizamos el id existente si lo hay.
-      let materiaRow = await pool.query(
-        'SELECT id FROM materias WHERE nombre = $1 AND carrera_id = $2',
-        [materia.nombre, carreraId]
-      );
+      // Gracias a la constraint UNIQUE (carrera_id, nombre) definida en db.js,
+      // las materias ya cargadas se ignoran (ON CONFLICT DO NOTHING) y no se
+      // duplican dentro de una misma carrera.
+      const resultado = await pool.query(`
+        INSERT INTO materias (nombre, anio, cuatrimestre, tipo, carrera_id)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (carrera_id, nombre) DO NOTHING
+        RETURNING id
+      `, [
+        materia.nombre,
+        materia.anio,
+        convertirCuatrimestre(materia.cuatrimestre),
+        materia.tipo,
+        carreraId
+      ]);
 
       let materiaId;
-      if (materiaRow.rows.length > 0) {
-        // Ya existe: reutilizamos su id (así mantenemos referencias estables).
-        materiaId = materiaRow.rows[0].id;
-      } else {
-        const resultado = await pool.query(`
-          INSERT INTO materias (nombre, anio, cuatrimestre, tipo, carrera_id)
-          VALUES ($1, $2, $3, $4, $5)
-          RETURNING id
-        `, [
-          materia.nombre,
-          materia.anio,
-          convertirCuatrimestre(materia.cuatrimestre),
-          materia.tipo,
-          carreraId
-        ]);
+      if (resultado.rowCount > 0) {
+        // Materia insertada nueva: usamos su id directamente.
         materiaId = resultado.rows[0].id;
         nuevasMaterias++;
+      } else {
+        // La materia ya existía en esta carrera (conflicto ignorado):
+        // recuperamos su id existente para mantener referencias estables.
+        const existente = await pool.query(
+          'SELECT id FROM materias WHERE nombre = $1 AND carrera_id = $2',
+          [materia.nombre, carreraId]
+        );
+        materiaId = existente.rows[0].id;
       }
       mapaIds[materia.nro] = materiaId;
     }

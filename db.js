@@ -108,6 +108,15 @@ async function initSchema() {
       END IF;
     END $$
   `);
+
+  // Migración segura: constraint UNIQUE en materias (carrera_id, nombre)
+  // Evita que se dupliquen materias dentro de una misma carrera.
+  // El DROP previo garantiza idempotencia aunque un intento anterior haya
+  // dejado la constraint con un nombre distinto o columnas diferentes.
+  await pool.query(`
+    ALTER TABLE materias DROP CONSTRAINT IF EXISTS materias_carrera_id_nombre_key;
+    ALTER TABLE materias ADD CONSTRAINT materias_carrera_id_nombre_key UNIQUE (carrera_id, nombre);
+  `);
 }
 
 // Inicializamos el esquema al cargar el módulo.
