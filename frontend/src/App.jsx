@@ -582,7 +582,9 @@ function App() {
       {/* Header informativo */}
       <div className="flex flex-col items-center mb-10 gap-2">
         <h1 className="text-indigo-500 text-lg sm:text-2xl font-bold tracking-[0.15em] sm:tracking-[0.3em] drop-shadow-md uppercase text-center break-words">
-          {usuario?.carrera_nombre || 'Cargando plan de estudios...'}
+          {usuario && usuario.rol === 'admin' && !usuario.carrera_nombre
+            ? 'Modo Administrador'
+            : usuario?.carrera_nombre || 'Cargando...'}
         </h1>
         <p className="text-slate-500 text-sm tracking-widest uppercase">
           Malla Curricular - Correlativas
