@@ -12,6 +12,8 @@ const materias = materiasInformatica;
 // Array de materias de la Licenciatura en Ciencias de la Educación (plan 20/99)
 const materiasEducacion = require('./licenciatura_educacion.js').materiasEducacion;
 
+const { materiasComputacion } = require('./licenciatura_computacion.js');
+
 // Función para convertir el cuatrimestre del JSON al valor numérico que usa la tabla
 // 'A' (anual) → 0, '1' → 1, '2' → 2
 function convertirCuatrimestre(cuatrimestre) {
@@ -35,6 +37,7 @@ async function ejecutarSeed() {
   const carreras = [
     { nombre: 'Ingeniería Informática', plan: '2/25', materias: materiasInformatica },
     { nombre: 'Licenciatura en Ciencias de la Educación', plan: '20/99', materias: materiasEducacion },
+    { nombre: 'Licenciatura en Ciencias de la Computación', plan: '32/12', materias: materiasComputacion },
   ];
 
   // Mapeo global por carrera: nro de la materia -> id real en la base de datos
